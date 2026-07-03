@@ -1,0 +1,212 @@
+{
+  "app_name": "Mission Velora",
+  "personality": "3 Editorial Mobile LIGHT",
+  "personality_one_liner": "A serene, content-led platform blending elegant serif typography with warm, earthy accents to evoke trust, impact, and a mindful learning experience.",
+  "color": {
+    "light": {
+      "surface": "#F9F8F6",
+      "onSurface": "#2C2A28",
+      "surfaceSecondary": "#F2EFEA",
+      "onSurfaceSecondary": "#4A4642",
+      "surfaceTertiary": "#E6DFD7",
+      "onSurfaceTertiary": "#5C5651",
+      "surfaceInverse": "#2C2A28",
+      "onSurfaceInverse": "#F9F8F6",
+      "brand": "#B85C38",
+      "brandPrimary": "#B85C38",
+      "onBrandPrimary": "#FFFFFF",
+      "brandSecondary": "#D17A54",
+      "onBrandSecondary": "#FFFFFF",
+      "brandTertiary": "#EBCFC4",
+      "onBrandTertiary": "#873B1E",
+      "success": "#6B8E6B",
+      "onSuccess": "#FFFFFF",
+      "warning": "#D99B58",
+      "onWarning": "#FFFFFF",
+      "error": "#C25B56",
+      "onError": "#FFFFFF",
+      "info": "#7A7571",
+      "onInfo": "#FFFFFF",
+      "border": "#E6DFD7",
+      "borderStrong": "#D1C7BD",
+      "divider": "#E6DFD7"
+    },
+    "dark": {
+      "surface": "#1E1C1A",
+      "onSurface": "#F9F8F6",
+      "surfaceSecondary": "#2C2A28",
+      "onSurfaceSecondary": "#E6DFD7",
+      "surfaceTertiary": "#3B3835",
+      "onSurfaceTertiary": "#D1C7BD",
+      "surfaceInverse": "#F9F8F6",
+      "onSurfaceInverse": "#1E1C1A",
+      "brand": "#B85C38",
+      "brandPrimary": "#D17A54",
+      "onBrandPrimary": "#1E1C1A",
+      "brandSecondary": "#B85C38",
+      "onBrandSecondary": "#FFFFFF",
+      "brandTertiary": "#4A291A",
+      "onBrandTertiary": "#EBCFC4",
+      "success": "#7FA37F",
+      "onSuccess": "#1E1C1A",
+      "warning": "#E8B273",
+      "onWarning": "#1E1C1A",
+      "error": "#D6746F",
+      "onError": "#1E1C1A",
+      "info": "#948E88",
+      "onInfo": "#1E1C1A",
+      "border": "#3B3835",
+      "borderStrong": "#5C5651",
+      "divider": "#3B3835"
+    }
+  },
+  "typography": {
+    "displayFontFamily": "Playfair Display",
+    "textFontFamily": "Satoshi",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Generous vertical breathing room. Use margin and padding intentionally to create a calm, magazine-like reading flow.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 0,
+    "md": 4,
+    "lg": 8,
+    "pill": 999
+  },
+  "shadow_tier": 0,
+  "navigation": "bottom_tabs",
+  "icon_set": "Phosphor",
+  "glassmorphism": {
+    "enabled": false,
+    "do's": [
+      "Use extremely sparingly. Editorial relies on flat paper tones and borders for separation."
+    ],
+    "dont's": [
+      "Avoid heavy blur on general cards or surfaces, to maintain the matte editorial feel."
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "Home",
+      "purpose": "Introduce Mission Velora's impact-driven goals and guide users towards featured content.",
+      "states": {
+        "loading": "Centered minimalist spinner.",
+        "empty": "N/A",
+        "error": "Message: 'Unable to load mission data.' with Retry button."
+      },
+      "layout": "Large top hero image (students) overlaid with a vertical linear gradient scrim (top-to-bottom: transparent -> surfaceInverse) to ensure text contrast. Use Playfair Display for the primary headline in the bottom 30% of the image. Below the fold: full-width sections for impact numbers (huge display font) and a featured course card with an animated progress ring."
+    },
+    {
+      "name": "Courses",
+      "purpose": "A catalog of educational courses offering clear hierarchy and progressive disclosure.",
+      "states": {
+        "loading": "Skeleton placeholders for course cards.",
+        "empty": "Minimalist icon with 'No courses available right now.'",
+        "error": "Readable error message with a prominent retry action."
+      },
+      "layout": "Large editorial header 'Courses'. Content rendered as a single-column list of cards. Cards feature a thumbnail image, course title, duration, instructor, and a subtle circular progress ring. Implement staggered fade-up reveals for cards using react-native-reanimated."
+    },
+    {
+      "name": "Course Detail",
+      "purpose": "Provide in-depth information about a specific course, its syllabus, and an enrollment/interest CTA.",
+      "states": {
+        "loading": "Spinner centered on the screen.",
+        "empty": "N/A",
+        "error": "Error fetching course details. Retry button."
+      },
+      "layout": "Hero image at the top with a subtle back button (contained in a tinted icon container). Below the image: title, instructor, level, and duration using quiet dividers. 'Syllabus' section displayed as an expandable list or straightforward vertical list. A sticky primary CTA ('Register Interest') anchored at the bottom inside a safe-area aware container with a soft top-fade."
+    },
+    {
+      "name": "Updates",
+      "purpose": "A mixed feed of events, seminars, digital education updates, and fun facts.",
+      "states": {
+        "loading": "Skeleton placeholders mapping to card shapes.",
+        "empty": "Illustration/icon + 'No updates yet. Check back soon!' + primary CTA to return to Home.",
+        "error": "Failed to load feed. Retry button."
+      },
+      "layout": "Top section features filter chips (All, Events, News, Fun Facts) in a horizontal scroll view (36pt height for chips, 56pt container). Below: feed of modular cards. 'Fun Facts' cards should omit images, using a brandTertiary background, large serif text, and zero borders to visually break the pattern of standard news/event image cards."
+    },
+    {
+      "name": "About",
+      "purpose": "Detail the organizational mission and capture user interest via a form.",
+      "states": {
+        "loading": "Standard spinner.",
+        "empty": "N/A",
+        "error": "Unable to load page. Retry button."
+      },
+      "layout": "Magazine-like layout with large breathing room. Deep mission statement with drop caps or oversized quotes. Lower section: 'Register Interest' form. Labels sit above inputs (no floating labels). Inputs use surfaceTertiary background. Submit button is full-width sticky at bottom inside a KeyboardAvoidingView."
+    }
+  ],
+  "images": {
+    "hero_mission": {
+      "url": "https://images.unsplash.com/photo-1522202176988-66273c2fd55f?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzOTB8MHwxfHNlYXJjaHwzfHxkaXZlcnNlJTIwc3R1ZGVudHMlMjB0ZWNoJTIwZWR1Y2F0aW9uJTIwbGVhcm5pbmd8ZW58MHx8fHwxNzgzMDgwODgxfDA&ixlib=rb-4.1.0&q=85",
+      "alt": "three people sitting in front of table laughing together, learning tech"
+    },
+    "course_1": {
+      "url": "https://images.unsplash.com/photo-1531482615713-2afd69097998?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzOTB8MHwxfHNlYXJjaHwxfHxkaXZlcnNlJTIwc3R1ZGVudHMlMjB0ZWNoJTIwZWR1Y2F0aW9uJTIwbGVhcm5pbmd8ZW58MHx8fHwxNzgzMDgwODgxfDA&ixlib=rb-4.1.0&q=85",
+      "alt": "woman and man sitting in front of monitor"
+    },
+    "course_2": {
+      "url": "https://images.unsplash.com/photo-1524178232363-1fb2b075b655?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzOTB8MHwxfHNlYXJjaHw0fHxkaXZlcnNlJTIwc3R1ZGVudHMlMjB0ZWNoJTIwZWR1Y2F0aW9uJTIwbGVhcm5pbmd8ZW58MHx8fHwxNzgzMDgwODgxfDA&ixlib=rb-4.1.0&q=85",
+      "alt": "a group of people in a room with a projector screen"
+    },
+    "course_3": {
+      "url": "https://images.unsplash.com/photo-1614399241279-790eead02644?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzV8MHwxfHNlYXJjaHwzfHxhYnN0cmFjdCUyMGluc3BpcmluZyUyMGVkdWNhdGlvbiUyMG5hdHVyZXxlbnwwfHx8fDE3ODMwODA4ODB8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "white paper document on green leaves"
+    },
+    "course_4": {
+      "url": "https://images.unsplash.com/photo-1705070093372-d270ce3ba14a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzV8MHwxfHNlYXJjaHwyfHxhYnN0cmFjdCUyMGluc3BpcmluZyUyMGVkdWNhdGlvbiUyMG5hdHVyZXxlbnwwfHx8fDE3ODMwODA4ODB8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "a single rose sitting on top of an open book"
+    },
+    "update_event_1": {
+      "url": "https://images.unsplash.com/photo-1587825140708-dfaf72ae4b04?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1ODh8MHwxfHNlYXJjaHwzfHx3b3Jrc2hvcCUyMHNlbWluYXIlMjBldmVudCUyMGNyb3dkfGVufDB8fHx8MTc4MzA4MDg4MHww&ixlib=rb-4.1.0&q=85",
+      "alt": "speaker on stage addressing large audience"
+    },
+    "update_news_1": {
+      "url": "https://images.unsplash.com/photo-1497555900562-b0096f007a2d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzV8MHwxfHNlYXJjaHwxfHxhYnN0cmFjdCUyMGluc3BpcmluZyUyMGVkdWNhdGlvbiUyMG5hdHVyZXxlbnwwfHx8fDE3ODMwODA4ODB8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "green plant leaf in close-up photography at daytime"
+    }
+  },
+  "haptics": {
+    "tab_press": "light",
+    "filter_chip_select": "light",
+    "cta_button_press": "medium",
+    "form_submit_success": "success"
+  },
+  "instructions_to_main_agent": [
+    "STRICT NO PURPLE/BLUE POLICY: Do not use any shades of blue, purple, or indigo in any component or state. Stick strictly to the warm paper tones and terracotta accents provided in the color palette.",
+    "NO EMOJIS: Do not use emojis anywhere in the app interface. Rely solely on Phosphor icons for iconography.",
+    "TYPOGRAPHY: Enforce max font weight 500 across all text elements. Do not use bold/semibold. Use size mapping (sm to 3xl) to create visual hierarchy.",
+    "HERO IMAGES: Any text layered over an image must have an expo-linear-gradient vertical scrim placed between the image and the text (e.g., from transparent to surfaceInverse) to guarantee WCAG readability.",
+    "UPDATES FEED: Ensure the 'Fun Facts' cards are distinctly styled—use brandTertiary as a background, strip away borders/images, and lean heavily on the Playfair Display display font to give it a quotes/editorial look.",
+    "SCROLLING: Ensure course lists and feed cards are scrollable. The filter chips on the Updates screen MUST be a horizontal scroll (36pt chip height, 56pt container height).",
+    "STICKY CTA: Implement sticky 'Register Interest' CTAs at the bottom of the Course Detail and About screens, above the bottom safe area but outside the main ScrollView. Keep content scrolling seamlessly behind it.",
+    "CARD REVEALS: Add subtle staggered fade/slide-up reveal animations on list items for the Courses and Updates sections using react-native-reanimated."
+  ]
+}
