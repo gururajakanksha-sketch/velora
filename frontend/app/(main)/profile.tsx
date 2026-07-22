@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { StyleSheet, View, Text, ScrollView, Pressable, ActivityIndicator } from "react-native";
+import { StyleSheet, View, Text, ScrollView, Pressable, ActivityIndicator, Alert, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, { FadeInUp } from "react-native-reanimated";
 import { useRouter } from "expo-router";
+import * as ImagePicker from "expo-image-picker";
+import { Image } from "expo-image";
 
 import { GridPaper } from "@/src/components/GridPaper";
 import { colors, font, fontSize, spacing, radius, shadow } from "@/src/theme";
@@ -12,7 +14,7 @@ import { useAuth } from "@/src/AuthContext";
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
-  const { user, signOut } = useAuth();
+  const { user, signOut, refresh } = useAuth();
   const router = useRouter();
 
   const [blueprint, setBlueprint] = useState<Blueprint | null>(null);
@@ -20,6 +22,8 @@ export default function ProfileScreen() {
   const [tasksTotal, setTasksTotal] = useState(0);
   const [xp, setXp] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -42,32 +46,72 @@ export default function ProfileScreen() {
     }
   }, []);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
 
   const level = 1 + Math.floor(xp / 100);
   const nextLevel = level * 100;
 
+  const uploadPicture = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) return;
+    const r = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true, aspect: [1, 1], quality: 0.55, base64: true,
+    });
+    if (r.canceled) return;
+    setUploading(true);
+    try {
+      const b64 = `data:image/jpeg;base64,${r.assets[0].base64}`;
+      await api.updatePicture(b64);
+      await refresh();
+    } finally { setUploading(false); }
+  };
+
+  const doReset = async () => {
+    setResetting(true);
+    try {
+      await api.resetBlueprint();
+      await refresh();
+      router.replace("/onboarding");
+    } finally { setResetting(false); }
+  };
+  const askReset = () => {
+    if (Platform.OS === "web") {
+      // Confirm-style modal via window.confirm on web
+      // eslint-disable-next-line no-alert
+      const ok = typeof window !== "undefined" && (window as any).confirm(
+        "Reset your blueprint?\n\nWe understand you can change — this lets you retake the questionnaire with new answers.\n\nThis does NOT delete your planner, XP, saved items, or vision boards."
+      );
+      if (ok) doReset();
+    } else {
+      Alert.alert(
+        "Reset your blueprint?",
+        "We understand you can change — this lets you retake the questionnaire with new answers.\n\nThis does NOT delete your planner, XP, saved items, or vision boards.",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Reset & redo", style: "destructive", onPress: doReset },
+        ]
+      );
+    }
+  };
+
   return (
     <GridPaper style={styles.container} variant="warm">
       <ScrollView
-        contentContainerStyle={[
-          styles.content,
-          { paddingTop: insets.top + spacing.md, paddingBottom: spacing.xxxl },
-        ]}
+        contentContainerStyle={[styles.content, { paddingTop: insets.top + spacing.md, paddingBottom: spacing.xxxl }]}
         showsVerticalScrollIndicator={false}
       >
         {/* Avatar */}
         <Animated.View entering={FadeInUp.duration(500)} style={styles.top}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>
-              {(user?.name || "?").trim().slice(0, 1).toUpperCase()}
-            </Text>
-          </View>
-          <Text style={styles.name} testID="profile-name">
-            {user?.name || "You"}
-          </Text>
+          <Pressable onPress={uploadPicture} style={styles.avatar} testID="profile-picture">
+            {user?.picture_base64 ? (
+              <Image source={user.picture_base64} style={styles.avatarImg} contentFit="cover" />
+            ) : uploading ? <ActivityIndicator color={colors.paper} /> : (
+              <Text style={styles.avatarText}>{(user?.name || "?").trim().slice(0, 1).toUpperCase()}</Text>
+            )}
+            <View style={styles.cameraBadge}><Ionicons name="camera" size={12} color={colors.paper} /></View>
+          </Pressable>
+          <Text style={styles.name} testID="profile-name">{user?.name || "You"}</Text>
           <Text style={styles.email}>{user?.email}</Text>
         </Animated.View>
 
@@ -140,6 +184,23 @@ export default function ProfileScreen() {
           )}
         </View>
 
+        {/* Your account */}
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>YOUR ACCOUNT</Text>
+          <LinkRow icon="document-text-outline" title="Pregrad" sub="Two résumés — fun + formal" onPress={() => router.push("/pregrad")} testID="link-pregrad" />
+          <LinkRow icon="book-outline" title="Digital Education" sub="Articles on cyber, AI, safety" onPress={() => router.push("/learn")} testID="link-learn" />
+          <LinkRow icon="mail-outline" title="Reach out to us" sub="Team + email" onPress={() => router.push("/contact")} testID="link-contact" />
+          <LinkRow
+            icon="refresh-outline"
+            title="Reset your blueprint"
+            sub="Retake the questionnaire. Keeps your planner, XP + saves."
+            onPress={askReset}
+            testID="link-reset"
+            danger
+            busy={resetting}
+          />
+        </View>
+
         {/* Sign out */}
         <Pressable onPress={signOut} style={styles.signOut} testID="sign-out-btn">
           <Ionicons name="log-out-outline" size={16} color={colors.error} />
@@ -148,11 +209,29 @@ export default function ProfileScreen() {
 
         {loading && <ActivityIndicator color={colors.navy} style={{ marginTop: spacing.md }} />}
         <Text style={styles.footer}>
-          Mission Velora · v0.2 · <Text style={{ fontStyle: "italic" }}>keep exploring</Text>
+          Velora · by Mission Velora · <Text style={{ fontStyle: "italic" }}>keep exploring</Text>
         </Text>
         <Text style={styles.footerSub}>Tasks total: {tasksTotal}</Text>
       </ScrollView>
     </GridPaper>
+  );
+}
+
+function LinkRow({ icon, title, sub, onPress, testID, danger, busy }: {
+  icon: keyof typeof Ionicons.glyphMap; title: string; sub?: string;
+  onPress: () => void; testID?: string; danger?: boolean; busy?: boolean;
+}) {
+  return (
+    <Pressable onPress={onPress} disabled={busy} testID={testID} style={({ pressed }) => [styles.linkRow, pressed && { opacity: 0.7 }]}>
+      <View style={[styles.linkIcon, danger && { backgroundColor: colors.paperCool }]}>
+        <Ionicons name={icon} size={18} color={danger ? colors.error : colors.navy} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.linkTitle, danger && { color: colors.error }]}>{title}</Text>
+        {sub && <Text style={styles.linkSub}>{sub}</Text>}
+      </View>
+      {busy ? <ActivityIndicator color={colors.navy} /> : <Ionicons name="chevron-forward" size={16} color={colors.inkMuted} />}
+    </Pressable>
   );
 }
 
@@ -179,6 +258,18 @@ const styles = StyleSheet.create({
     fontStyle: "italic",
     fontSize: 34,
   },
+  avatarImg: { width: "100%", height: "100%", borderRadius: 42 },
+  cameraBadge: {
+    position: "absolute", right: -2, bottom: -2, width: 24, height: 24, borderRadius: 12,
+    backgroundColor: colors.navy, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: colors.paperWarm,
+  },
+  linkRow: {
+    flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: spacing.md,
+    borderBottomWidth: 1, borderBottomColor: colors.paperInk,
+  },
+  linkIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.paperCool, alignItems: "center", justifyContent: "center" },
+  linkTitle: { fontFamily: font.display, fontSize: fontSize.lg, color: colors.ink, fontWeight: "500" },
+  linkSub: { fontFamily: font.text, fontSize: fontSize.sm, color: colors.inkMuted, marginTop: 2 },
   name: {
     fontFamily: font.display,
     fontSize: fontSize.xxl,

@@ -23,6 +23,7 @@ export default function PlannerScreen() {
   const [tasks, setTasks] = useState<Task[] | null>(null);
   const [newTitle, setNewTitle] = useState("");
   const [busy, setBusy] = useState(false);
+  const [category, setCategory] = useState<"general" | "daily" | "monthly" | "yearly">("general");
 
   const load = useCallback(async () => {
     try {
@@ -39,7 +40,7 @@ export default function PlannerScreen() {
     if (!newTitle.trim()) return;
     setBusy(true);
     try {
-      const r = await api.createTask({ title: newTitle.trim() });
+      const r = await api.createTask({ title: newTitle.trim(), category });
       setTasks((prev) => [r.task, ...(prev || [])]);
       setNewTitle("");
     } finally {
@@ -68,9 +69,9 @@ export default function PlannerScreen() {
     }
   };
 
-  const active = (tasks || []).filter((t) => t.status !== "done");
-  const done = (tasks || []).filter((t) => t.status === "done");
-  const xp = done.reduce((sum, t) => sum + (t.xp || 0), 0);
+  const active = (tasks || []).filter((t) => t.status !== "done" && ((t as any).category || "general") === category);
+  const done = (tasks || []).filter((t) => t.status === "done" && ((t as any).category || "general") === category);
+  const xp = (tasks || []).filter((t) => t.status === "done").reduce((sum, t) => sum + (t.xp || 0), 0);
 
   return (
     <GridPaper style={styles.container} variant="warm">
@@ -100,6 +101,26 @@ export default function PlannerScreen() {
               <Text style={styles.xpValue}>{xp}</Text>
             </View>
           </View>
+
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.catRow}
+            style={{ maxHeight: 56, marginTop: spacing.sm }}
+          >
+            {(["general", "daily", "monthly", "yearly"] as const).map((c) => (
+              <Pressable
+                key={c}
+                onPress={() => setCategory(c)}
+                style={[styles.catChip, category === c && styles.catChipSel]}
+                testID={`planner-cat-${c}`}
+              >
+                <Text style={[styles.catChipText, category === c && styles.catChipTextSel]}>
+                  {c.charAt(0).toUpperCase() + c.slice(1)}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
 
           <View style={styles.addRow}>
             <TextInput
@@ -411,4 +432,9 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     maxWidth: 300,
   },
+  catRow: { paddingHorizontal: 4, gap: 8, alignItems: "center", height: 56 },
+  catChip: { height: 36, paddingHorizontal: 14, borderRadius: 18, borderWidth: 1, borderColor: colors.paperInk, alignItems: "center", justifyContent: "center", flexShrink: 0, backgroundColor: colors.paper },
+  catChipSel: { backgroundColor: colors.ink, borderColor: colors.ink },
+  catChipText: { fontFamily: font.text, fontSize: fontSize.sm, color: colors.inkSoft, fontWeight: "600" },
+  catChipTextSel: { color: colors.paper },
 });

@@ -1,0 +1,40 @@
+{
+  "summary": "Backend-only regression + new-endpoint pass for Mission Velora v0.3. Expanded pytest suite to 65 tests across /app/backend/tests/test_velora_backend.py (updated existing 32) + /app/backend/tests/test_velora_v2.py (new 33 tests for this iteration's new endpoints). Injected user + session_token into Mongo (per test_credentials.md) for auth-gated routes. 65/65 passed against the public preview URL. New endpoints validated: /api/ shape (app=Velora, org=Mission Velora), /api/contact (missionvelora8@gmail.com + co_founders), /api/articles (28 items, category + q filters, detail body+links, 404), /api/explore countries (40 with fees_inr_lakhs/pr_friendly/best_majors/visa) & universities (933, tag=india returns 73 India-tagged unis), /api/explore/recommend (countries budget+PR scoring & universities India+CS), /api/news fresh=true (Gemini or fallback, both return items), /api/blueprint/reset (401 without token, flips onboarding_complete=false with token), /api/profile/picture PUT (auth + base64 persistence verified via /me), /api/vision-boards full CRUD (create/get/upsert/list/delete), /api/pregrad GET + PUT fun+formal (per-user unique upsert, 400 on bad mode), /api/planner category=daily (order auto-increments), category PATCH, /api/planner/reorder (verified new order in DB), /api/collections arbitrary kind='news' with payload + dedupe.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/conftest.py",
+    "/app/backend/tests/test_velora_backend.py",
+    "/app/backend/tests/test_velora_v2.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py has grown to 836 lines. Seed data now lives in seed.json (good), but models + all routers still inline — consider splitting into routers/ modules (auth, explore, planner, collections, vision_boards, pregrad, articles, news) before it exceeds ~1000 LOC.",
+    "In /api/explore/recommend, when kind='universities' and `country` matches, items still get scored 0 if no CS majors are present, but they can appear in top-25 only if any signal scored > 0. This is fine, but note the score threshold (score > 0) silently drops all zero-signal items — document this in the endpoint docstring so frontend doesn't expect a full list.",
+    "/api/blueprint/reset uses `update_one` on db.blueprints without matching any user_id filter — it sets reset_at/archived on ANY blueprint doc if there happens to be one shared. Currently OK because blueprints are per-user, but the write should be filtered by user_id explicitly to be safe. Reference: server.py:525-528.",
+    "/api/news `all_items[seed % len(all_items):] + all_items[: seed % len(all_items)]` after `if kind` filter can raise ZeroDivisionError if a rare kind filter yields no items. Consider guarding when `all_items` empty (already guarded via `if all_items else []`, so ok — but confirm behaviour with an invalid kind filter).",
+    "PregradPayload has `mode` field but the route also takes `mode` as path param and re-authoritative — the body `mode` is ignored. Minor: mark body `mode` as unused or drop it from PregradPayload."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_velora_backend.py (updated: root shape now checks app=Velora + org=Mission Velora, scholarship ids updated from s-1 to s-rhodes, scholarship count check relaxed to >=15)",
+    "/app/backend/tests/test_velora_v2.py (new: 33 tests for v0.3 endpoints)"
+  ],
+  "success_rate": {
+    "backend": "100% (65/65)",
+    "frontend": "not_tested (frontend skipped per request)"
+  },
+  "seed_data_creation": "Reused single test user (user_id=user_test0000001, email=TEST_velora_tester@velora.local) and session (session_token=test-token-velora-abc123, 7-day expiry) inserted into MongoDB test_database.users / user_sessions via conftest fixture. Tests self-clean tasks/saves/onboarding/blueprints/pregrads/vision_boards for that user_id.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "BASE_URL is EXPO_PUBLIC_BACKEND_URL from frontend/.env (https://velora-learn-1.preview.emergentagent.com). Auth is Emergent Google OAuth — inject session directly into Mongo (see conftest.py `seeded_session_token`). AI blueprint call ran successfully against gemini-3.1-pro-preview via emergentintegrations; /api/news fresh=true also invokes Gemini and caches per day in db.news_cache — both AI paths have seed fallbacks so tests accept either. Seed data now has: 933 universities (73 India), 40 countries, 45 scholarships, 55 MUNs, 32 hidden_courses, 28 articles across 7 categories (ai-literacy, civic-tech, cybersecurity, digital-education, digital-wellness, media-literacy, online-safety). Rhodes scholarship id is now 's-rhodes' (previously 's-1'). Frontend tests skipped entirely by main agent request.",
+  "rca_of_issue": "N/A — no failures."
+}

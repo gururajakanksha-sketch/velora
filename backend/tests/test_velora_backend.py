@@ -17,7 +17,8 @@ class TestPublic:
         assert r.status_code == 200
         j = r.json()
         assert j.get("status") == "ok"
-        assert j.get("app") == "Mission Velora"
+        assert j.get("app") == "Velora"
+        assert j.get("org") == "Mission Velora"
 
     def test_quotes_non_empty(self, api_client, base_url):
         r = api_client.get(f"{base_url}/api/quotes")
@@ -60,19 +61,19 @@ class TestNews:
 
 # ------------------------------------------- EXPLORE
 class TestExplore:
-    def test_scholarships_seeded_15(self, api_client, base_url):
+    def test_scholarships_seeded_count(self, api_client, base_url):
         r = api_client.get(f"{base_url}/api/explore", params={"kind": "scholarships"})
         assert r.status_code == 200
         items = r.json().get("items")
         assert isinstance(items, list)
-        assert len(items) == 15, f"expected 15 seeded scholarships got {len(items)}"
+        assert len(items) >= 15, f"expected >=15 seeded scholarships got {len(items)}"
 
     def test_scholarships_query_filter(self, api_client, base_url):
         r = api_client.get(f"{base_url}/api/explore", params={"kind": "scholarships", "q": "rhodes"})
         assert r.status_code == 200
         items = r.json()["items"]
         assert len(items) >= 1
-        assert any(i["id"] == "s-1" for i in items)
+        assert any(i["id"] == "s-rhodes" for i in items)
 
     def test_scholarships_tag_filter(self, api_client, base_url):
         r = api_client.get(f"{base_url}/api/explore", params={"kind": "scholarships", "tag": "leadership"})
@@ -82,10 +83,10 @@ class TestExplore:
         assert all("leadership" in (i.get("tags") or []) for i in items)
 
     def test_scholarship_detail(self, api_client, base_url):
-        r = api_client.get(f"{base_url}/api/explore/scholarships/s-1")
+        r = api_client.get(f"{base_url}/api/explore/scholarships/s-rhodes")
         assert r.status_code == 200
         j = r.json()
-        assert j["id"] == "s-1"
+        assert j["id"] == "s-rhodes"
         assert "Rhodes" in j["title"]
 
     def test_unknown_kind_returns_404(self, api_client, base_url):

@@ -67,7 +67,7 @@ export default function Splash() {
           <View style={styles.brandBadge}>
             <Ionicons name="planet" size={20} color={colors.paperWarm} />
           </View>
-          <Text style={styles.brandName}>MISSION VELORA</Text>
+          <Text style={styles.brandName}>VELORA</Text>
         </Animated.View>
 
         <View style={styles.center}>

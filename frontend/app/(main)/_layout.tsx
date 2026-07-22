@@ -62,14 +62,15 @@ export default function MainTabs() {
         }}
       />
       <Tabs.Screen
-        name="discover"
+        name="vision"
         options={{
-          title: "Today",
-          tabBarButtonTestID: "tab-discover",
-          tabBarIcon: ({ focused }) => <TabIcon focused={focused} name="sunny" />,
-          tabBarLabel: ({ focused }) => <TabLabel focused={focused} label="Today" />,
+          title: "Vision",
+          tabBarButtonTestID: "tab-vision",
+          tabBarIcon: ({ focused }) => <TabIcon focused={focused} name="sparkles" />,
+          tabBarLabel: ({ focused }) => <TabLabel focused={focused} label="Vision" />,
         }}
       />
+      <Tabs.Screen name="discover" options={{ href: null }} />
       <Tabs.Screen
         name="profile"
         options={{

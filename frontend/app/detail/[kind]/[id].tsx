@@ -190,7 +190,7 @@ export default function DetailScreen() {
 
           <Animated.View entering={FadeInUp.duration(400).delay(100)} style={styles.summaryCard}>
             <Text style={styles.summaryText}>
-              {item.summary || item.why || `Details for ${item.title} — pulled from Mission Velora's curated catalog.`}
+              {item.summary || item.why || `Details for ${item.title} — pulled from Velora's curated catalog.`}
             </Text>
             {item.hidden_program && (
               <View style={styles.hiddenProgram}>
@@ -216,7 +216,7 @@ export default function DetailScreen() {
           <View style={styles.planPreview}>
             <Text style={styles.sectionLabel}>SUGGESTED PLAN</Text>
             <Text style={styles.sectionSub}>
-              Mission Velora can auto-add these as tasks with milestones.
+              Velora can auto-add these as tasks with milestones.
             </Text>
             {planTasks(String(kind), item).map((t, i) => (
               <View key={i} style={styles.planRow}>

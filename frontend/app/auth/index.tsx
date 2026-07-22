@@ -31,7 +31,7 @@ export default function LoginScreen() {
           </View>
         </Animated.View>
         <Animated.View entering={FadeInUp.duration(500).delay(150)}>
-          <Text style={styles.brand}>MISSION VELORA</Text>
+          <Text style={styles.brand}>VELORA</Text>
         </Animated.View>
 
         <Animated.View entering={FadeInUp.duration(600).delay(250)} style={styles.headline}>
