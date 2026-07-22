@@ -1,47 +1,51 @@
-# Mission Velora — PRD (v0.2 rebuild)
+# Mission Velora — Product Requirements Document (MVP)
 
-## Product
-**Mission Velora** is an **AI Life Architecture Platform for teenagers (14–19)** — not a career portal, not a productivity tool. It helps young people transform uncertainty into curiosity and curiosity into measurable action.
+## Vision
+Mission Velora is an **AI Life Architecture Platform** for teenagers and young adults (14–19). It doesn't tell users who to become — it continuously widens their awareness, helps them discover opportunities they'd never find on their own (hidden careers, hidden university courses, scholarships, MUNs, countries), and turns curiosity into concrete daily action. Every recommendation answers: *why does this fit me · how do I start today · what's the next milestone · where can I learn more*.
 
-## MVP Scope (this build)
+## Design language
+Grid-paper cream base (`#FBF6E0`) with warm scrapbook accents (yellow paper, pink grid, blue/pink stars & ribbons) and a navy ink family lifted straight from the Mission Velora logo mascot. Mixed fun-serif + sans typography. No AI-slop purple/blue gradients. No emojis (Ionicons only). See `/app/design_guidelines.json` and `/app/frontend/src/theme.ts`.
 
-### Splash → Auth → Onboarding → Main App
-1. **Splash quote** (auto-timeout 2.4s) — rotating non-cliché motivational quote on grid-paper background.
-2. **Auth** — Emergent-managed Google Sign-In (real OAuth, secure token in `expo-secure-store`).
-3. **Future Architect Onboarding** — three interactive activities in one step-based flow:
-   - **Dream Résumé:** pick from 30 curated achievements + add any custom ones.
-   - **Dream Life Builder:** pick life prompts across 7 groups (cities, environments, work style, travel, balance, impact focus, industries).
-   - **Future Board (Pinterest-style):** tap tiles from a curated 36-image library **and/or** paste Pinterest/any image URL — both flows supported per user request.
-4. **AI Future Blueprint** — Gemini 3.1 Pro (via Emergent LLM key). Produces a compact JSON blueprint: `one_line_summary`, `themes`, `career_seeds`, `hidden_paths`, recommended IDs across all Explore categories, and 3 seeded Side Quests. Falls back to a deterministic tag-based blueprint if AI fails.
+## MVP scope (shipped this iteration)
+1. **Splash + rotating quote** — 2.6s opener with grid paper, brand mark, mascot stickers, tap-to-continue.
+2. **Auth** — Emergent-managed Google OAuth (mobile via `expo-web-browser` + `expo-secure-store`, web via redirect). Backend exchange at `/api/auth/session` (session_id → 7-day token in Mongo TTL index).
+3. **Onboarding (Future Architect)** — 3 activities in a single flow:
+   - **Dream Résumé** — pick from 30 seed achievements + add custom ones
+   - **Dream Life Builder** — chip clouds across cities, environments, work style, movement, pace, impact, industries
+   - **Future Board** — Pinterest-style pin board: paste a Pinterest image URL **or** pick from our 36-image curated library
+4. **AI Future Blueprint** — Gemini 3.1 Pro (via `emergentintegrations`) analyses selected tags + prompts and returns a JSON blueprint (themes, one-liner, career seeds, hidden interdisciplinary paths, recommended IDs across scholarships/universities/hidden courses/countries/MUNs, and 3 side quests). Deterministic fallback if the AI fails so the app never dead-ends.
+5. **Mission Control** — Dashboard with greeting, Blueprint summary, career seeds, hidden paths, side quests (one-tap "Add to Planner"), Today teaser, and the **"Fresh from the world"** horizontal news feed (new careers, career news, industry facts — 18 curated cards).
+6. **Explore** — Categories: Scholarships (15), Universities (10), Hidden Courses (12), MUNs (10), Countries (10). Search + tag filter.
+7. **Detail screen** — Single dynamic route `/detail/[kind]/[id]` with save-to-Collections + **Add-to-Planner** (auto-generates the right task titles per kind: "Apply", "Research", "Register", etc.).
+8. **Mission Planner** — CRUD tasks & AI-generated Side Quests; status toggle; XP shown.
+9. **Daily Discovery** — Deterministic-by-day rotating picks (hidden course, scholarship, university, country, MUN + a challenge).
+10. **Profile** — Name/email, blueprint themes, saved collections, XP, sign-out.
 
-### Main app (bottom tabs, 5)
-- **Mission Control (`/(main)`):** blueprint hero card, career seeds, hidden paths, seeded side quests (one-tap add to planner), today teaser.
-- **Explore (`/(main)/explore`):** searchable + chip-filtered catalog across Scholarships (15), Universities (10), Hidden Courses (12), MUNs (10), Countries (10). Curated seed data.
-- **Planner (`/(main)/planner`):** manual tasks + AI-generated side quests, XP badge, complete/uncomplete/delete.
-- **Today (`/(main)/discover`):** daily discovery — user-and-date-deterministic pick of quote, hidden course, scholarship spotlight, university spotlight, country to watch, MUN pick, and a daily challenge with "Add to Planner".
-- **Me (`/(main)/profile`):** avatar, level (1 + xp/100), XP earned, saves count, blueprint themes recap, saved collections list, sign out.
+## Backend (FastAPI + Motor + emergentintegrations)
+All routes under `/api`. Auth-gated endpoints require `Authorization: Bearer <session_token>`.
 
-### Detail route (`/detail/[kind]/[id]`)
-Generic template for any explore item: hero title, meta pills, summary, hidden-program callout, tags, an auto-generated **suggested plan** (per-kind template), sticky **Add to Mission Planner** CTA (creates linked tasks with milestones), and a save bookmark toggle.
+- `GET  /api/` health
+- `GET  /api/quotes` — 12 inspiring quotes
+- `GET  /api/onboarding/library` — 30 achievements + 37 life prompts + 36 board images
+- `GET  /api/news[?kind=]` — new careers, news, facts (18 items)
+- `GET  /api/explore?kind=...&q=&tag=`
+- `GET  /api/explore/{kind}/{id}`
+- `POST /api/auth/session` (accepts `session_id` **or** `session_token`)
+- `GET  /api/auth/me`
+- `POST /api/auth/logout`
+- `POST /api/onboarding/complete` → AI Blueprint (Gemini `gemini-3.1-pro-preview`, fallback safe)
+- `GET  /api/blueprint`
+- `GET/POST/PATCH/DELETE /api/planner[/{id}]`
+- `GET/POST/DELETE /api/collections[/{id}]`
+- `GET  /api/discover/today`
 
-## Design
-Brand-locked from the logo: **navy `#1E3A8A` on cream grid-paper `#FBF6E0`**, with pink grid lines, yellow paper accents, playful scrapbook tape/star/dot stickers and a mixed serif+italic+sans font stack. `GridPaper` background component. No purple/violet, no emoji icons — Ionicons only. All screens grid-paper themed with rotated scrapbook cards. See `/app/frontend/src/theme.ts`.
+MongoDB indexes: `users.email`, `users.user_id`, `user_sessions.session_token`, `user_sessions.expires_at` (TTL).
 
-## Backend (FastAPI + Mongo + emergentintegrations)
-- `GET  /api/quotes` — public quotes for splash.
-- `GET  /api/onboarding/library` — public library (achievements, life prompts, board images).
-- `POST /api/auth/session` — exchange Emergent session_id → server-issued session_token.
-- `GET  /api/auth/me` — current user (Bearer).
-- `POST /api/auth/logout` — clear session.
-- `POST /api/onboarding/complete` — persists selections + generates blueprint via Gemini.
-- `GET  /api/blueprint` — get current blueprint.
-- `GET  /api/explore?kind=...&q=&tag=` / `GET /api/explore/{kind}/{id}` — catalog.
-- `GET/POST/PATCH/DELETE /api/planner[/id]` — tasks & side quests.
-- `GET/POST /api/collections`, `DELETE /api/collections/{save_id}` — saves.
-- `GET  /api/discover/today` — deterministic-by-day discovery bundle.
+## Test results
+32/32 backend tests passing (see `/app/test_reports/iteration_1.json`). Gemini AI path verified live. Frontend splash & auth screens screenshot-verified. Google OAuth cannot be automated headlessly — needs a real Google account for the full E2E on device / browser preview.
 
-## Deferred (Phase 2, schemas designed but disabled)
-Journey (visual timeline), Impact Portfolio, Skill Trees, Digital Ed Hub, notifications, mentors, parent/teacher dashboards.
+## Not in MVP (deferred, schemas ready)
+Journey timeline, Impact Portfolio, Skill Trees, XP achievement gallery, Digital Ed / Online Safety Hub, Universal Search, offline caching, dark mode toggle, notifications, drag-to-reorder Mission Control cards.
 
 ## Business enhancement
-Every recommendation → one-tap "Add to Mission Planner" that generates a **milestone chain of tasks with XP**. This converts vague inspiration into completed applications & measurable engagement — the closest thing to a conversion funnel a teen product can honestly have.
+Every card in the app (career seed, hidden path, scholarship, university, MUN, country, side quest) has a **one-tap "Add to Planner"**. This is the growth loop — the Planner becomes the personal launchpad users return to daily, and every returned session generates fresh Blueprint signals for the next AI pass. The "Fresh from the world" horizontal news strip on Mission Control adds a habitual "why-open-the-app-today" trigger without notifications.
