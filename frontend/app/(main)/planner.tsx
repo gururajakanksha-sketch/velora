@@ -1,29 +1,35 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   StyleSheet,
   View,
   Text,
-  ScrollView,
   Pressable,
   TextInput,
   ActivityIndicator,
   Platform,
   KeyboardAvoidingView,
+  ScrollView,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, { FadeInUp } from "react-native-reanimated";
+import DraggableFlatList, {
+  RenderItemParams,
+  ScaleDecorator,
+} from "react-native-draggable-flatlist";
 
 import { GridPaper } from "@/src/components/GridPaper";
 import { colors, font, fontSize, spacing, radius, shadow } from "@/src/theme";
 import { api, Task } from "@/src/api";
+
+type Category = "general" | "daily" | "monthly" | "yearly";
 
 export default function PlannerScreen() {
   const insets = useSafeAreaInsets();
   const [tasks, setTasks] = useState<Task[] | null>(null);
   const [newTitle, setNewTitle] = useState("");
   const [busy, setBusy] = useState(false);
-  const [category, setCategory] = useState<"general" | "daily" | "monthly" | "yearly">("general");
+  const [category, setCategory] = useState<Category>("general");
 
   const load = useCallback(async () => {
     try {
@@ -41,7 +47,7 @@ export default function PlannerScreen() {
     setBusy(true);
     try {
       const r = await api.createTask({ title: newTitle.trim(), category });
-      setTasks((prev) => [r.task, ...(prev || [])]);
+      setTasks((prev) => [...(prev || []), r.task]);
       setNewTitle("");
     } finally {
       setBusy(false);
@@ -69,9 +75,72 @@ export default function PlannerScreen() {
     }
   };
 
-  const active = (tasks || []).filter((t) => t.status !== "done" && ((t as any).category || "general") === category);
-  const done = (tasks || []).filter((t) => t.status === "done" && ((t as any).category || "general") === category);
-  const xp = (tasks || []).filter((t) => t.status === "done").reduce((sum, t) => sum + (t.xp || 0), 0);
+  const active = useMemo(
+    () =>
+      (tasks || []).filter(
+        (t) =>
+          t.status !== "done" &&
+          ((t as any).category || "general") === category
+      ),
+    [tasks, category]
+  );
+  const done = useMemo(
+    () =>
+      (tasks || []).filter(
+        (t) =>
+          t.status === "done" &&
+          ((t as any).category || "general") === category
+      ),
+    [tasks, category]
+  );
+  const xp = useMemo(
+    () =>
+      (tasks || [])
+        .filter((t) => t.status === "done")
+        .reduce((sum, t) => sum + (t.xp || 0), 0),
+    [tasks]
+  );
+
+  const onReorderActive = useCallback(
+    async (reordered: Task[]) => {
+      // Optimistically merge back into full task list
+      setTasks((prev) => {
+        if (!prev) return prev;
+        const others = prev.filter(
+          (t) =>
+            !(
+              t.status !== "done" &&
+              ((t as any).category || "general") === category
+            )
+        );
+        return [...others, ...reordered];
+      });
+      try {
+        await api.reorderTasks(
+          category,
+          reordered.map((t) => t.id)
+        );
+      } catch {
+        load();
+      }
+    },
+    [category, load]
+  );
+
+  const renderActiveItem = useCallback(
+    ({ item, drag, isActive }: RenderItemParams<Task>) => (
+      <ScaleDecorator activeScale={1.03}>
+        <TaskRow
+          task={item}
+          onToggle={() => toggle(item)}
+          onDelete={() => remove(item)}
+          onLongPress={drag}
+          isDragging={isActive}
+        />
+      </ScaleDecorator>
+    ),
+    []
+  );
 
   return (
     <GridPaper style={styles.container} variant="warm">
@@ -80,105 +149,126 @@ export default function PlannerScreen() {
         style={{ flex: 1 }}
         keyboardVerticalOffset={80}
       >
-        <ScrollView
+        <DraggableFlatList
+          testID="planner-list"
+          data={active}
+          keyExtractor={(t) => t.id}
+          renderItem={renderActiveItem}
+          onDragEnd={({ data }) => onReorderActive(data)}
+          activationDistance={12}
+          containerStyle={{ flex: 1 }}
           contentContainerStyle={[
             styles.content,
             { paddingTop: insets.top + spacing.md, paddingBottom: spacing.xxxl },
           ]}
-          showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
-        >
-          <View style={styles.headerRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.eyebrow}>MISSION PLANNER</Text>
-              <Text style={styles.title}>
-                Your{" "}
-                <Text style={styles.titleAccent}>next moves.</Text>
-              </Text>
-            </View>
-            <View style={styles.xpBadge} testID="xp-badge">
-              <Text style={styles.xpLabel}>XP</Text>
-              <Text style={styles.xpValue}>{xp}</Text>
-            </View>
-          </View>
+          ListHeaderComponent={
+            <View>
+              <View style={styles.headerRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.eyebrow}>MISSION PLANNER</Text>
+                  <Text style={styles.title}>
+                    Your <Text style={styles.titleAccent}>next moves.</Text>
+                  </Text>
+                </View>
+                <View style={styles.xpBadge} testID="xp-badge">
+                  <Text style={styles.xpLabel}>XP</Text>
+                  <Text style={styles.xpValue}>{xp}</Text>
+                </View>
+              </View>
 
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.catRow}
-            style={{ maxHeight: 56, marginTop: spacing.sm }}
-          >
-            {(["general", "daily", "monthly", "yearly"] as const).map((c) => (
-              <Pressable
-                key={c}
-                onPress={() => setCategory(c)}
-                style={[styles.catChip, category === c && styles.catChipSel]}
-                testID={`planner-cat-${c}`}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.catRow}
+                style={{ maxHeight: 56, marginTop: spacing.sm }}
               >
-                <Text style={[styles.catChipText, category === c && styles.catChipTextSel]}>
-                  {c.charAt(0).toUpperCase() + c.slice(1)}
-                </Text>
-              </Pressable>
-            ))}
-          </ScrollView>
+                {(["general", "daily", "monthly", "yearly"] as Category[]).map((c) => (
+                  <Pressable
+                    key={c}
+                    onPress={() => setCategory(c)}
+                    style={[styles.catChip, category === c && styles.catChipSel]}
+                    testID={`planner-cat-${c}`}
+                  >
+                    <Text
+                      style={[
+                        styles.catChipText,
+                        category === c && styles.catChipTextSel,
+                      ]}
+                    >
+                      {c.charAt(0).toUpperCase() + c.slice(1)}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
 
-          <View style={styles.addRow}>
-            <TextInput
-              testID="planner-input"
-              value={newTitle}
-              onChangeText={setNewTitle}
-              placeholder="Add a task or side quest…"
-              placeholderTextColor={colors.inkFaint}
-              style={styles.addInput}
-              onSubmitEditing={add}
-              returnKeyType="done"
-            />
-            <Pressable
-              onPress={add}
-              disabled={!newTitle.trim() || busy}
-              style={[
-                styles.addBtn,
-                (!newTitle.trim() || busy) && { opacity: 0.5 },
-              ]}
-              testID="planner-add"
-            >
-              {busy ? (
-                <ActivityIndicator color={colors.paper} size="small" />
+              <View style={styles.addRow}>
+                <TextInput
+                  testID="planner-input"
+                  value={newTitle}
+                  onChangeText={setNewTitle}
+                  placeholder="Add a task or side quest…"
+                  placeholderTextColor={colors.inkFaint}
+                  style={styles.addInput}
+                  onSubmitEditing={add}
+                  returnKeyType="done"
+                />
+                <Pressable
+                  onPress={add}
+                  disabled={!newTitle.trim() || busy}
+                  style={[
+                    styles.addBtn,
+                    (!newTitle.trim() || busy) && { opacity: 0.5 },
+                  ]}
+                  testID="planner-add"
+                >
+                  {busy ? (
+                    <ActivityIndicator color={colors.paper} size="small" />
+                  ) : (
+                    <Ionicons name="add" size={22} color={colors.paper} />
+                  )}
+                </Pressable>
+              </View>
+
+              {tasks === null ? (
+                <View style={styles.loading}>
+                  <ActivityIndicator color={colors.navy} />
+                </View>
+              ) : active.length === 0 && done.length === 0 ? (
+                <EmptyState />
               ) : (
-                <Ionicons name="add" size={22} color={colors.paper} />
-              )}
-            </Pressable>
-          </View>
-
-          {tasks === null ? (
-            <View style={styles.loading}>
-              <ActivityIndicator color={colors.navy} />
-            </View>
-          ) : tasks.length === 0 ? (
-            <EmptyState />
-          ) : (
-            <>
-              {active.length > 0 && (
-                <View style={styles.section}>
+                <View style={styles.sectionHeaderRow}>
                   <Text style={styles.sectionLabel}>ACTIVE ({active.length})</Text>
-                  {active.map((t, i) => (
-                    <Animated.View key={t.id} entering={FadeInUp.duration(300).delay(40 * i)}>
-                      <TaskRow task={t} onToggle={() => toggle(t)} onDelete={() => remove(t)} />
-                    </Animated.View>
-                  ))}
+                  {active.length > 1 && (
+                    <View style={styles.hint}>
+                      <Ionicons
+                        name="menu-outline"
+                        size={11}
+                        color={colors.inkMuted}
+                      />
+                      <Text style={styles.hintText}>Hold & drag to reorder</Text>
+                    </View>
+                  )}
                 </View>
               )}
-              {done.length > 0 && (
-                <View style={styles.section}>
-                  <Text style={styles.sectionLabel}>COMPLETED ({done.length})</Text>
-                  {done.map((t) => (
-                    <TaskRow key={t.id} task={t} onToggle={() => toggle(t)} onDelete={() => remove(t)} />
-                  ))}
-                </View>
-              )}
-            </>
-          )}
-        </ScrollView>
+            </View>
+          }
+          ListFooterComponent={
+            done.length > 0 ? (
+              <View style={[styles.section, { marginTop: spacing.lg }]}>
+                <Text style={styles.sectionLabel}>COMPLETED ({done.length})</Text>
+                {done.map((t) => (
+                  <TaskRow
+                    key={t.id}
+                    task={t}
+                    onToggle={() => toggle(t)}
+                    onDelete={() => remove(t)}
+                  />
+                ))}
+              </View>
+            ) : null
+          }
+        />
       </KeyboardAvoidingView>
     </GridPaper>
   );
@@ -188,50 +278,78 @@ function TaskRow({
   task,
   onToggle,
   onDelete,
+  onLongPress,
+  isDragging,
 }: {
   task: Task;
   onToggle: () => void;
   onDelete: () => void;
+  onLongPress?: () => void;
+  isDragging?: boolean;
 }) {
   const done = task.status === "done";
   return (
-    <View style={[styles.row, done && styles.rowDone]}>
-      <Pressable
-        onPress={onToggle}
-        style={[styles.check, done && styles.checkDone]}
-        testID={`task-toggle-${task.id}`}
-        hitSlop={8}
+    <Animated.View entering={FadeInUp.duration(220)}>
+      <View
+        style={[
+          styles.row,
+          done && styles.rowDone,
+          isDragging && styles.rowDragging,
+        ]}
       >
-        {done && <Ionicons name="checkmark" size={16} color={colors.paper} />}
-      </Pressable>
-      <View style={{ flex: 1 }}>
-        <View style={styles.rowTitleWrap}>
-          {task.kind === "side_quest" && (
-            <View style={styles.questTag}>
-              <Ionicons name="sparkles" size={10} color={colors.navy} />
-              <Text style={styles.questTagText}>QUEST</Text>
-            </View>
-          )}
-          <Text
-            style={[styles.rowTitle, done && styles.rowTitleDone]}
-            numberOfLines={2}
+        {onLongPress && !done && (
+          <Pressable
+            onLongPress={onLongPress}
+            delayLongPress={200}
+            hitSlop={8}
+            style={styles.dragHandle}
+            testID={`task-drag-${task.id}`}
           >
-            {task.title}
-          </Text>
+            <Ionicons name="reorder-two-outline" size={18} color={colors.inkMuted} />
+          </Pressable>
+        )}
+        <Pressable
+          onPress={onToggle}
+          style={[styles.check, done && styles.checkDone]}
+          testID={`task-toggle-${task.id}`}
+          hitSlop={8}
+        >
+          {done && <Ionicons name="checkmark" size={16} color={colors.paper} />}
+        </Pressable>
+        <View style={{ flex: 1 }}>
+          <View style={styles.rowTitleWrap}>
+            {task.kind === "side_quest" && (
+              <View style={styles.questTag}>
+                <Ionicons name="sparkles" size={10} color={colors.navy} />
+                <Text style={styles.questTagText}>QUEST</Text>
+              </View>
+            )}
+            <Text
+              style={[styles.rowTitle, done && styles.rowTitleDone]}
+              numberOfLines={2}
+            >
+              {task.title}
+            </Text>
+          </View>
+          {task.detail && (
+            <Text
+              style={[styles.rowDetail, done && styles.rowTitleDone]}
+              numberOfLines={2}
+            >
+              {task.detail}
+            </Text>
+          )}
+          {task.xp > 0 && <Text style={styles.rowXp}>+{task.xp} XP</Text>}
         </View>
-        {task.detail && (
-          <Text style={[styles.rowDetail, done && styles.rowTitleDone]} numberOfLines={2}>
-            {task.detail}
-          </Text>
-        )}
-        {task.xp > 0 && (
-          <Text style={styles.rowXp}>+{task.xp} XP</Text>
-        )}
+        <Pressable
+          onPress={onDelete}
+          testID={`task-delete-${task.id}`}
+          hitSlop={8}
+        >
+          <Ionicons name="trash-outline" size={16} color={colors.inkMuted} />
+        </Pressable>
       </View>
-      <Pressable onPress={onDelete} testID={`task-delete-${task.id}`} hitSlop={8}>
-        <Ionicons name="trash-outline" size={16} color={colors.inkMuted} />
-      </Pressable>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -243,7 +361,7 @@ function EmptyState() {
       </View>
       <Text style={styles.emptyTitle}>Nothing yet.</Text>
       <Text style={styles.emptyBody}>
-        Add your first move above, or head to Mission Control and pick a Side Quest to add.
+        Add your first move above, or head to Mission Control and pick a Side Quest.
       </Text>
     </View>
   );
@@ -252,11 +370,7 @@ function EmptyState() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { paddingHorizontal: spacing.xl },
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    marginBottom: spacing.xl,
-  },
+  headerRow: { flexDirection: "row", alignItems: "flex-end", marginBottom: spacing.xl },
   eyebrow: {
     fontFamily: font.text,
     fontSize: fontSize.xs,
@@ -271,7 +385,11 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontWeight: "500",
   },
-  titleAccent: { fontFamily: font.displayItalic, fontStyle: "italic", color: colors.navy },
+  titleAccent: {
+    fontFamily: font.displayItalic,
+    fontStyle: "italic",
+    color: colors.navy,
+  },
   xpBadge: {
     alignItems: "center",
     paddingHorizontal: spacing.md,
@@ -293,11 +411,7 @@ const styles = StyleSheet.create({
     color: colors.paper,
     fontWeight: "500",
   },
-  addRow: {
-    flexDirection: "row",
-    gap: spacing.sm,
-    marginBottom: spacing.xl,
-  },
+  addRow: { flexDirection: "row", gap: spacing.sm, marginBottom: spacing.xl },
   addInput: {
     flex: 1,
     height: 48,
@@ -321,13 +435,33 @@ const styles = StyleSheet.create({
   },
   loading: { alignItems: "center", padding: spacing.xxxl },
   section: { marginBottom: spacing.xl },
+  sectionHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: spacing.sm,
+  },
   sectionLabel: {
     fontFamily: font.text,
     fontSize: fontSize.xs,
     letterSpacing: 2,
     color: colors.inkMuted,
     fontWeight: "700",
-    marginBottom: spacing.sm,
+  },
+  hint: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    backgroundColor: colors.paperWarm,
+    borderRadius: radius.pill,
+  },
+  hintText: {
+    fontFamily: font.displayItalic,
+    fontStyle: "italic",
+    fontSize: 10,
+    color: colors.inkMuted,
   },
   row: {
     flexDirection: "row",
@@ -341,6 +475,17 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   rowDone: { backgroundColor: colors.paperCool, opacity: 0.85 },
+  rowDragging: {
+    ...shadow.card,
+    borderColor: colors.navy,
+    backgroundColor: colors.paperWarm,
+  },
+  dragHandle: {
+    width: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 4,
+  },
   check: {
     width: 24,
     height: 24,
@@ -351,10 +496,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginTop: 2,
   },
-  checkDone: {
-    backgroundColor: colors.success,
-    borderColor: colors.success,
-  },
+  checkDone: { backgroundColor: colors.success, borderColor: colors.success },
   rowTitleWrap: {
     flexDirection: "row",
     alignItems: "center",
@@ -404,11 +546,7 @@ const styles = StyleSheet.create({
     color: colors.navy,
     marginTop: 4,
   },
-  empty: {
-    alignItems: "center",
-    padding: spacing.xxl,
-    gap: spacing.md,
-  },
+  empty: { alignItems: "center", padding: spacing.xxl, gap: spacing.md },
   emptyBadge: {
     width: 72,
     height: 72,
@@ -432,9 +570,29 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     maxWidth: 300,
   },
-  catRow: { paddingHorizontal: 4, gap: 8, alignItems: "center", height: 56 },
-  catChip: { height: 36, paddingHorizontal: 14, borderRadius: 18, borderWidth: 1, borderColor: colors.paperInk, alignItems: "center", justifyContent: "center", flexShrink: 0, backgroundColor: colors.paper },
+  catRow: {
+    paddingHorizontal: 4,
+    gap: 8,
+    alignItems: "center",
+    height: 56,
+  },
+  catChip: {
+    height: 36,
+    paddingHorizontal: 14,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: colors.paperInk,
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+    backgroundColor: colors.paper,
+  },
   catChipSel: { backgroundColor: colors.ink, borderColor: colors.ink },
-  catChipText: { fontFamily: font.text, fontSize: fontSize.sm, color: colors.inkSoft, fontWeight: "600" },
+  catChipText: {
+    fontFamily: font.text,
+    fontSize: fontSize.sm,
+    color: colors.inkSoft,
+    fontWeight: "600",
+  },
   catChipTextSel: { color: colors.paper },
 });

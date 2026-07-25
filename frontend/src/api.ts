@@ -135,6 +135,7 @@ export const api = {
       life_prompts: LifePrompt[];
       board_images: BoardImage[];
       stickers: string[];
+      color_stickers: { sticker: string; color: string; label: string }[];
     }>("/onboarding/library"),
 
   createSession: (data: { session_id?: string; session_token?: string }) =>
@@ -165,12 +166,31 @@ export const api = {
   blueprint: () => req<{ blueprint: Blueprint }>("/blueprint", { auth: true }),
   resetBlueprint: () => req<{ ok: boolean }>("/blueprint/reset", { method: "POST", auth: true }),
 
-  explore: (kind: ExploreKind, params?: { q?: string; tag?: string }) => {
+  explore: (kind: ExploreKind, params?: {
+    q?: string;
+    tag?: string;
+    country?: string;
+    state?: string;
+    field?: string;
+    max_fees_inr_lakhs?: number;
+  }) => {
     const p = new URLSearchParams({ kind });
     if (params?.q) p.set("q", params.q);
     if (params?.tag) p.set("tag", params.tag);
+    if (params?.country) p.set("country", params.country);
+    if (params?.state) p.set("state", params.state);
+    if (params?.field) p.set("field", params.field);
+    if (params?.max_fees_inr_lakhs != null)
+      p.set("max_fees_inr_lakhs", String(params.max_fees_inr_lakhs));
     return req<{ items: any[] }>(`/explore?${p.toString()}`);
   },
+  exploreFilterOptions: (kind: ExploreKind) =>
+    req<{
+      countries: string[];
+      states_by_country: Record<string, string[]>;
+      fields: string[];
+      budget_buckets_inr_lakhs: number[];
+    }>(`/explore/filters/options?kind=${kind}`),
   exploreItem: (kind: ExploreKind, id: string) => req<any>(`/explore/${kind}/${id}`),
   recommend: (payload: {
     kind: "countries" | "universities";

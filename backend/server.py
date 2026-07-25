@@ -200,6 +200,7 @@ async def onboarding_library():
         "life_prompts": LIFE_PROMPTS,
         "board_images": BOARD_LIBRARY,
         "stickers": STICKERS,
+        "color_stickers": SEED.get("color_stickers", []),
     }
 
 
@@ -302,13 +303,21 @@ SOURCES = {
 }
 
 
-def _filter(items: List[dict], q: Optional[str], tag: Optional[str]) -> List[dict]:
+def _filter(
+    items: List[dict],
+    q: Optional[str],
+    tag: Optional[str],
+    country: Optional[str] = None,
+    state: Optional[str] = None,
+    field: Optional[str] = None,
+    max_fees: Optional[float] = None,
+) -> List[dict]:
     out = items
     if q:
         ql = q.lower()
         def _searchable(x):
             return " ".join([
-                str(x.get(k, "")) for k in ("title", "summary", "why", "country", "region", "field", "at", "tags", "state")
+                str(x.get(k, "")) for k in ("title", "summary", "why", "country", "region", "field", "at", "tags", "state", "city")
             ]).lower()
         out = [i for i in out if ql in _searchable(i)]
     if tag and tag != "all":
@@ -322,14 +331,98 @@ def _filter(items: List[dict], q: Optional[str], tag: Optional[str]) -> List[dic
                 or tl == str(x.get("state", "")).lower()
             )
         out = [i for i in out if _match(i)]
+    if country:
+        cl = country.lower()
+        out = [i for i in out if str(i.get("country", "")).lower() == cl]
+    if state:
+        sl = state.lower()
+        out = [i for i in out if str(i.get("state", "")).lower() == sl]
+    if field:
+        fl = field.lower().strip()
+        def _has_field(x):
+            majors = [str(m).lower().strip() for m in (x.get("best_majors") or [])]
+            field_str = str(x.get("field", "")).lower()
+            # split field csv into tokens
+            tokens = set(majors) | {t.strip() for t in field_str.split(",") if t.strip()}
+            # exact-token or clear phrase match; also allow field substring only if token >= 4 chars
+            if fl in tokens:
+                return True
+            for tk in tokens:
+                if fl == tk:
+                    return True
+                if len(fl) >= 4 and (fl in tk or tk in fl):
+                    return True
+            return False
+        out = [i for i in out if _has_field(i)]
+    if max_fees is not None:
+        def _ok_fees(x):
+            f = x.get("fees_inr_lakhs")
+            if f is None or f == "":
+                return True  # unknown fees pass
+            try:
+                return float(f) <= max_fees
+            except Exception:
+                return True
+        out = [i for i in out if _ok_fees(i)]
     return out
 
 
 @api.get("/explore")
-async def explore(kind: str, q: Optional[str] = None, tag: Optional[str] = None):
+async def explore(
+    kind: str,
+    q: Optional[str] = None,
+    tag: Optional[str] = None,
+    country: Optional[str] = None,
+    state: Optional[str] = None,
+    field: Optional[str] = None,
+    max_fees_inr_lakhs: Optional[float] = None,
+):
     if kind not in SOURCES:
         raise HTTPException(status_code=404, detail="Unknown kind")
-    return {"items": _filter(SOURCES[kind], q, tag)}
+    return {
+        "items": _filter(
+            SOURCES[kind], q, tag,
+            country=country, state=state, field=field, max_fees=max_fees_inr_lakhs,
+        )
+    }
+
+
+@api.get("/explore/filters/options")
+async def explore_filter_options(kind: str):
+    """Return available filter values for a kind. Used by the UI dropdowns."""
+    if kind not in SOURCES:
+        raise HTTPException(status_code=404, detail="Unknown kind")
+    items = SOURCES[kind]
+    countries = sorted({str(i.get("country", "")).strip() for i in items if i.get("country")})
+    # states are keyed by country for nested filtering
+    states_by_country: dict[str, set[str]] = {}
+    for i in items:
+        c = str(i.get("country", "")).strip()
+        s = str(i.get("state", "")).strip()
+        if c and s:
+            states_by_country.setdefault(c, set()).add(s)
+    fields = set()
+    for i in items:
+        for m in (i.get("best_majors") or []):
+            if m:
+                fields.add(str(m).strip())
+        # scholarship items use "field" as CSV string
+        f = i.get("field")
+        if isinstance(f, str):
+            for x in f.split(","):
+                x = x.strip()
+                if x:
+                    fields.add(x)
+        elif isinstance(f, list):
+            for x in f:
+                if x:
+                    fields.add(str(x).strip())
+    return {
+        "countries": countries,
+        "states_by_country": {k: sorted(v) for k, v in states_by_country.items()},
+        "fields": sorted(fields),
+        "budget_buckets_inr_lakhs": [1, 2, 3, 5, 10, 20, 50, 100],
+    }
 
 
 @api.get("/explore/{kind}/{item_id}")
