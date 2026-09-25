@@ -91,7 +91,7 @@ class TestExploreV2:
         assert r.status_code == 200
         items = r.json()["items"]
         # spec says ~933
-        assert 900 <= len(items) <= 1000, f"expected ~933 universities got {len(items)}"
+        assert len(items) == 1580, f"expected 1580 universities got {len(items)}"
 
     def test_universities_tag_india(self, api_client, base_url):
         r = api_client.get(f"{base_url}/api/explore", params={"kind": "universities", "tag": "india"})
@@ -108,7 +108,7 @@ class TestExploreV2:
         r = api_client.get(f"{base_url}/api/explore", params={"kind": "countries"})
         assert r.status_code == 200
         items = r.json()["items"]
-        assert len(items) == 40, f"expected 40 countries got {len(items)}"
+        assert len(items) == 198, f"expected 198 countries got {len(items)}"
         c = items[0]
         for k in ("fees_inr_lakhs", "pr_friendly", "best_majors", "visa"):
             assert k in c, f"country missing {k}"

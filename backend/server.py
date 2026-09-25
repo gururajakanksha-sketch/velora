@@ -11,8 +11,11 @@ from pathlib import Path
 from typing import List, Optional
 
 import httpx
+import secrets
+from google import genai
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
 from starlette.middleware.cors import CORSMiddleware
@@ -22,7 +25,9 @@ load_dotenv(ROOT_DIR / ".env")
 
 mongo_url = os.environ["MONGO_URL"]
 db_name = os.environ["DB_NAME"]
-EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
+
+# Removing Velora dependency
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 client = AsyncIOMotorClient(mongo_url)
 db = client[db_name]
@@ -205,34 +210,130 @@ async def onboarding_library():
 
 
 # ------------------ AUTH ------------------
+
+@api.get("/auth/google/callback")
+async def google_auth_callback(code: Optional[str] = None, error: Optional[str] = None):
+    if error:
+        raise HTTPException(status_code=400, detail=f"Google OAuth error: {error}")
+
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing Google authorization code")
+
+    google_client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
+    google_client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+    google_redirect_uri = os.environ.get("GOOGLE_REDIRECT_URI", "")
+
+    if not google_client_id or not google_client_secret or not google_redirect_uri:
+        raise HTTPException(status_code=500, detail="Google OAuth is not configured")
+
+    async with httpx.AsyncClient(timeout=15) as h:
+        token_response = await h.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "client_id": google_client_id,
+                "client_secret": google_client_secret,
+                "code": code,
+                "grant_type": "authorization_code",
+                "redirect_uri": google_redirect_uri,
+            },
+        )
+
+    if token_response.status_code != 200:
+        raise HTTPException(status_code=401, detail="Failed to exchange Google authorization code")
+
+    token_data = token_response.json()
+    access_token = token_data.get("access_token")
+
+    if not access_token:
+        raise HTTPException(status_code=401, detail="Google did not return an access token")
+
+    async with httpx.AsyncClient(timeout=15) as h:
+        profile_response = await h.get(
+            "https://openidconnect.googleapis.com/v1/userinfo",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+    if profile_response.status_code != 200:
+        raise HTTPException(status_code=401, detail="Failed to retrieve Google profile")
+
+    profile = profile_response.json()
+
+    email = (profile.get("email") or "").lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="No email returned by Google")
+
+    auth_code = secrets.token_urlsafe(32)
+
+    await db.auth_codes.insert_one({
+        "code": auth_code,
+        "email": email,
+        "name": profile.get("name"),
+        "picture": profile.get("picture"),
+        "expires_at": datetime.now(timezone.utc) + timedelta(minutes=2),
+        "created_at": datetime.now(timezone.utc),
+    })
+
+    from urllib.parse import quote
+
+    frontend_url = "http://localhost:8081/auth"
+    return RedirectResponse(
+        f"{frontend_url}#session_id={quote(auth_code)}"
+    )
+
+@api.get("/auth/google/start")
+async def google_auth_start():
+    google_client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
+    google_redirect_uri = os.environ.get("GOOGLE_REDIRECT_URI", "")
+
+    if not google_client_id or not google_redirect_uri:
+        raise HTTPException(status_code=500, detail="Google OAuth is not configured")
+
+    params = {
+        "client_id": google_client_id,
+        "redirect_uri": google_redirect_uri,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "access_type": "offline",
+        "prompt": "select_account",
+    }
+
+    from urllib.parse import urlencode
+
+    auth_url = (
+            "https://accounts.google.com/o/oauth2/v2/auth?"
+            + urlencode(params)
+    )
+
+    from fastapi.responses import RedirectResponse
+
+    return RedirectResponse(auth_url)
+
 @api.post("/auth/session")
 async def create_session(payload: SessionRequest, request: Request):
     session_token = payload.session_token
     profile: Optional[dict] = None
 
     if payload.session_id and not session_token:
-        async with httpx.AsyncClient(timeout=15) as h:
-            r = await h.get(
-                "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data",
-                headers={"X-Session-ID": payload.session_id},
-            )
-        if r.status_code != 200:
-            raise HTTPException(status_code=401, detail="Invalid session_id")
-        profile = r.json()
-        session_token = profile.get("session_token")
+        auth_code = await db.auth_codes.find_one_and_delete(
+        {
+                "code": payload.session_id,
+                "expires_at": {"$gt": datetime.now(timezone.utc)}, },
+    {"_id": 0},
+        )
+
+        if not auth_code:
+            raise HTTPException(status_code=401, detail="Invalid or expired auth code")
+
+        profile = {
+            "email": auth_code["email"],
+            "name": auth_code.get("name"),
+            "picture": auth_code.get("picture"),
+        }
+
+        session_token = secrets.token_urlsafe(32)
 
     if not session_token:
         raise HTTPException(status_code=400, detail="session_token or session_id required")
-
-    if profile is None:
-        async with httpx.AsyncClient(timeout=15) as h:
-            r = await h.get(
-                "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data",
-                headers={"X-Session-ID": session_token},
-            )
-        if r.status_code != 200:
-            raise HTTPException(status_code=401, detail="Invalid session_token")
-        profile = r.json()
 
     email = (profile.get("email") or "").lower()
     if not email:
@@ -503,7 +604,6 @@ async def _generate_blueprint(user: dict, payload: OnboardingPayload) -> dict:
     tags = _tags_from_onboarding(payload)
     custom = payload.custom_achievements
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
         system = (
             "You are Velora's Future Blueprint engine. You help teenagers (14-19) "
             "explore possible futures. You NEVER assign personality labels or claim certainty. "
@@ -530,19 +630,22 @@ Signals:
 - Custom stated dreams: {custom}
 - Total board pins: {len(payload.board_pins)}
 """
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"blueprint-{user['user_id']}-{datetime.now(timezone.utc).timestamp()}",
-            system_message=system,
-        ).with_model("gemini", "gemini-3.1-pro-preview")
-        resp = await chat.send_message(UserMessage(text=prompt))
-        text = (resp or "").strip()
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        resp = await client.aio.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt,
+        config={
+            "system_instruction": system,
+            "response_mime_type": "application/json",
+            },
+        )
+        text = (resp.text or "").strip()
         if text.startswith("```"):
             text = text.strip("`")
             if text.lower().startswith("json"):
                 text = text[4:].strip()
         blueprint = json.loads(text)
-        blueprint["_source"] = "gemini-3.1-pro-preview"
+        blueprint["_source"] = "gemini-2.5-flash"
     except Exception as e:
         log.exception("AI blueprint failed, using fallback: %s", e)
         top = sorted(set(tags), key=lambda x: tags.count(x), reverse=True)[:5]
@@ -747,17 +850,6 @@ async def discover_today(user: dict = Depends(get_current_user)):
 async def _generate_fresh_news(count: int = 6) -> List[dict]:
     """Ask Gemini for fresh career trend items — cached per day."""
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"news-{datetime.now(timezone.utc).strftime('%Y-%m-%d')}",
-            system_message=(
-                "You are a career-trends editor for teens aged 14-19. You surface REAL, recent, "
-                "verifiable trends in emerging careers, education, scholarships, and tech. "
-                "Never invent companies. Return STRICT compact JSON only."
-            ),
-        ).with_model("gemini", "gemini-3.1-pro-preview")
-
         prompt = f"""Produce EXACTLY {count} news items as a JSON array. Each object has:
 {{
   "id": "n-ai-<slug>",
@@ -769,17 +861,31 @@ async def _generate_fresh_news(count: int = 6) -> List[dict]:
 }}
 Mix of: 2 emerging careers, 2 pieces of current education/scholarship news, 2 useful facts about future of work.
 Return ONLY the JSON array, no code fences."""
-        resp = await chat.send_message(UserMessage(text=prompt))
-        text = (resp or "").strip()
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        resp = await client.aio.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config={
+                "system_instruction": (
+                    "You are a career-trends editor for teens aged 14-19. "
+                    "You surface REAL, recent, verifiable trends in emerging careers, "
+                    "education, scholarships, and tech. Never invent companies. "
+                    "Return STRICT compact JSON only."
+                ),
+                "response_mime_type": "application/json",
+            },
+        )
+        text = (resp.text or "").strip()
         if text.startswith("```"):
             text = text.strip("`")
-            if text.lower().startswith("json"):
-                text = text[4:].strip()
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
+
         arr = json.loads(text)
         if isinstance(arr, list):
             return arr[:count]
     except Exception as e:
-        log.warning("AI news generation failed: %s", e)
+        log.exception("AI news generation failed: %s", e)
     return []
 
 
@@ -787,7 +893,7 @@ Return ONLY the JSON array, no code fences."""
 async def news(kind: Optional[str] = None, fresh: bool = True):
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     ai_items: List[dict] = []
-    if fresh and EMERGENT_LLM_KEY:
+    if fresh and GEMINI_API_KEY:
         cached = await db.news_cache.find_one({"day": today}, {"_id": 0})
         if cached and cached.get("items"):
             ai_items = cached["items"]

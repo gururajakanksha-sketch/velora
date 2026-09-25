@@ -10,7 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.emergent.veloralearn.b3xuha"
+      "bundleIdentifier": "com.veloralearn.b3xuha"
     },
     "android": {
       "adaptiveIcon": {
@@ -18,7 +18,7 @@
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.emergent.veloralearn.b3xuha"
+      "package": "com.veloralearn.b3xuha"
     },
     "web": {
       "bundler": "metro",

@@ -44,19 +44,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // On web: check hash/query for session_id after redirect
   useEffect(() => {
     if (Platform.OS !== "web" || typeof window === "undefined") return;
-    const hash = window.location.hash || "";
-    const q = window.location.search || "";
-    const m1 = hash.match(/session_id=([^&]+)/);
-    const m2 = q.match(/session_id=([^&]+)/);
-    const sessionId = (m1?.[1] || m2?.[1] || "").trim();
-    if (sessionId) {
-      processSessionId(sessionId).then(() => {
+
+    const handleSessionId = () => {
+      const hash = window.location.hash || "";
+      const q = window.location.search || "";
+      const m1 = hash.match(/session_id=([^&]+)/);
+      const m2 = q.match(/session_id=([^&]+)/);
+      const sessionId = decodeURIComponent((m1?.[1] || m2?.[1] || "").trim());
+
+      if (!sessionId) return;
+      processSessionId(sessionId).then((result) => {
         try {
           window.history.replaceState(null, "", window.location.pathname);
         } catch {}
       });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    };
+
+    handleSessionId();
+    window.addEventListener("popstate", handleSessionId);
+
+    return () => {
+      window.removeEventListener("popstate", handleSessionId);
+    };
   }, []);
 
   const processSessionId = useCallback(async (sessionId: string) => {
@@ -76,7 +85,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         ? (typeof window !== "undefined" ? window.location.origin + "/" : "/")
         : Linking.createURL("");
 
-    const authUrl = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
+    const authUrl = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/auth/google/start`;
 
     if (Platform.OS === "web") {
       if (typeof window !== "undefined") {

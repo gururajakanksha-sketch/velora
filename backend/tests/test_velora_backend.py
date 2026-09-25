@@ -244,7 +244,7 @@ class TestOnboardingComplete:
         assert j.get("ok") is True
         bp = j["blueprint"]
         # Both paths acceptable
-        assert bp.get("_source") in ("gemini-3.1-pro-preview", "fallback"), f"unexpected _source={bp.get('_source')}"
+        assert bp.get("_source") in ("gemini-2.5-flash", "fallback"), f"unexpected _source={bp.get('_source')}"
         for k in (
             "themes", "one_line_summary", "career_seeds", "hidden_paths",
             "recommended_scholarship_ids", "recommended_university_ids",
@@ -260,4 +260,4 @@ class TestOnboardingComplete:
         assert r.status_code == 200
         bp = r.json()["blueprint"]
         assert bp["user_id"] == "user_test0000001"
-        assert bp.get("_source") in ("gemini-3.1-pro-preview", "fallback")
+        assert bp.get("_source") in ("gemini-2.5-flash", "fallback")
