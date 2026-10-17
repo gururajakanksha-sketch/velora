@@ -275,7 +275,10 @@ async def google_auth_callback(code: Optional[str] = None, error: Optional[str] 
 
     from urllib.parse import quote
 
-    frontend_url = "http://localhost:8081/auth"
+    frontend_url = os.environ.get(
+        "FRONTEND_URL",
+        "http://localhost:8081/auth"
+    )
     return RedirectResponse(
         f"{frontend_url}#session_id={quote(auth_code)}"
     )
