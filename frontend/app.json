@@ -18,7 +18,16 @@
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.veloralearn.b3xuha"
+      "package": "com.veloralearn.b3xuha",
+      "queries": [
+        {
+          "intent": [
+            {
+              "action": "android.support.customtabs.action.CustomTabsService"
+            }
+          ]
+        }
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -39,6 +48,12 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "9091b61f-1406-45d7-8dff-2562bcf6dae2"
+      }
     }
   }
 }

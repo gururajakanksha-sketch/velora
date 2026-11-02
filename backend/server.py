@@ -212,7 +212,30 @@ async def onboarding_library():
 # ------------------ AUTH ------------------
 
 @api.get("/auth/google/callback")
-async def google_auth_callback(code: Optional[str] = None, error: Optional[str] = None):
+async def google_auth_callback(
+    request: Request,
+    code: Optional[str] = None,
+    error: Optional[str] = None,
+    state: Optional[str] = None,
+):
+    if not state or len(state) != 43:
+        raise HTTPException(status_code=400, detail="Missing or invalid OAuth state")
+
+    # Bind the callback to the browser that started this attempt. The cookie
+    # name is state-specific so separate simultaneous attempts do not collide.
+    state_cookie_name = f"velora_oauth_state_{state}"
+    cookie_state = request.cookies.get(state_cookie_name)
+    if not cookie_state or not secrets.compare_digest(cookie_state, state):
+        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+
+    now = datetime.now(timezone.utc)
+    oauth_attempt = await db.oauth_states.find_one_and_delete({
+        "state": state,
+        "expires_at": {"$gt": now},
+    })
+    if not oauth_attempt:
+        raise HTTPException(status_code=400, detail="Invalid, expired, or already used OAuth state")
+
     if error:
         raise HTTPException(status_code=400, detail=f"Google OAuth error: {error}")
 
@@ -275,16 +298,25 @@ async def google_auth_callback(code: Optional[str] = None, error: Optional[str] 
 
     from urllib.parse import quote
 
-    frontend_url = os.environ.get(
-        "FRONTEND_URL",
-        "http://localhost:8081/auth"
+    # Android uses a fixed app deep link; web keeps its existing hash redirect.
+    if oauth_attempt.get("platform") == "android":
+        response = RedirectResponse(
+            f"frontend://auth/callback?session_id={quote(auth_code)}"
+        )
+    else:
+        frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:8081/auth")
+        response = RedirectResponse(f"{frontend_url}#session_id={quote(auth_code)}")
+    response.delete_cookie(
+        key=state_cookie_name,
+        path="/api/auth/google",
+        secure=True,
+        httponly=True,
+        samesite="lax",
     )
-    return RedirectResponse(
-        f"{frontend_url}#session_id={quote(auth_code)}"
-    )
+    return response
 
 @api.get("/auth/google/start")
-async def google_auth_start():
+async def google_auth_start(platform: Optional[str] = None):
     google_client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
     google_redirect_uri = os.environ.get("GOOGLE_REDIRECT_URI", "")
 
@@ -300,6 +332,16 @@ async def google_auth_start():
         "prompt": "select_account",
     }
 
+    state = secrets.token_urlsafe(32)
+    now = datetime.now(timezone.utc)
+    await db.oauth_states.insert_one({
+        "state": state,
+        "platform": "android" if platform == "android" else "web",
+        "created_at": now,
+        "expires_at": now + timedelta(minutes=10),
+    })
+    params["state"] = state
+
     from urllib.parse import urlencode
 
     auth_url = (
@@ -309,7 +351,17 @@ async def google_auth_start():
 
     from fastapi.responses import RedirectResponse
 
-    return RedirectResponse(auth_url)
+    response = RedirectResponse(auth_url)
+    response.set_cookie(
+        key=f"velora_oauth_state_{state}",
+        value=state,
+        max_age=600,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        path="/api/auth/google",
+    )
+    return response
 
 @api.post("/auth/session")
 async def create_session(payload: SessionRequest, request: Request):
@@ -1030,6 +1082,8 @@ async def startup_indexes():
     await db.vision_boards.create_index("user_id")
     await db.pregrads.create_index([("user_id", 1), ("mode", 1)], unique=True)
     await db.news_cache.create_index("day", unique=True)
+    await db.oauth_states.create_index("state", unique=True)
+    await db.oauth_states.create_index("expires_at", expireAfterSeconds=0)
 
 
 @app.on_event("shutdown")

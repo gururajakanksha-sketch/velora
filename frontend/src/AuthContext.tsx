@@ -83,9 +83,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const redirectUrl =
       Platform.OS === "web"
         ? (typeof window !== "undefined" ? window.location.origin + "/" : "/")
-        : Linking.createURL("");
+        : Linking.createURL("auth/callback");
 
-    const authUrl = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/auth/google/start`;
+    const authUrl = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/auth/google/start${
+      Platform.OS === "android" ? "?platform=android" : ""
+    }`;
 
     if (Platform.OS === "web") {
       if (typeof window !== "undefined") {
@@ -95,7 +97,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     try {
-      const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUrl);
+      const result = await WebBrowser.openAuthSessionAsync(
+        authUrl,
+        redirectUrl,
+        {
+          browserPackage: "com.android.chrome",
+        }
+      );
+
       if (result.type !== "success" || !result.url) {
         return { ok: false, error: "cancelled" };
       }
