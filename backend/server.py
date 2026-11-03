@@ -459,21 +459,41 @@ SOURCES = {
 }
 
 
+def _as_list(v):
+    """Normalize CSV or list into a list of lowercased strings."""
+    if v is None:
+        return []
+    if isinstance(v, list):
+        items = v
+    else:
+        items = [x for x in str(v).split(",") if x.strip()]
+    return [str(x).strip().lower() for x in items if str(x).strip()]
+
+
 def _filter(
     items: List[dict],
     q: Optional[str],
     tag: Optional[str],
-    country: Optional[str] = None,
-    state: Optional[str] = None,
-    field: Optional[str] = None,
+    country=None,
+    state=None,
+    field=None,
+    region=None,
     max_fees: Optional[float] = None,
+    level: Optional[str] = None,
+    funding: Optional[str] = None,
+    competitiveness: Optional[str] = None,
+    pr_friendly: Optional[bool] = None,
+    tier=None,
 ) -> List[dict]:
     out = items
     if q:
         ql = q.lower()
         def _searchable(x):
             return " ".join([
-                str(x.get(k, "")) for k in ("title", "summary", "why", "country", "region", "field", "at", "tags", "state", "city")
+                str(x.get(k, "")) for k in (
+                    "title", "summary", "why", "country", "region", "field",
+                    "at", "tags", "state", "city", "level", "funding",
+                )
             ]).lower()
         out = [i for i in out if ql in _searchable(i)]
     if tag and tag != "all":
@@ -487,39 +507,66 @@ def _filter(
                 or tl == str(x.get("state", "")).lower()
             )
         out = [i for i in out if _match(i)]
-    if country:
-        cl = country.lower()
-        out = [i for i in out if str(i.get("country", "")).lower() == cl]
-    if state:
-        sl = state.lower()
-        out = [i for i in out if str(i.get("state", "")).lower() == sl]
-    if field:
-        fl = field.lower().strip()
-        def _has_field(x):
+
+    countries = _as_list(country)
+    if countries:
+        out = [i for i in out if str(i.get("country", "")).lower() in countries]
+
+    states = _as_list(state)
+    if states:
+        out = [i for i in out if str(i.get("state", "")).lower() in states]
+
+    regions = _as_list(region)
+    if regions:
+        out = [i for i in out if str(i.get("region", "")).lower() in regions]
+
+    fields = _as_list(field)
+    if fields:
+        def _has_any_field(x):
             majors = [str(m).lower().strip() for m in (x.get("best_majors") or [])]
             field_str = str(x.get("field", "")).lower()
-            # split field csv into tokens
             tokens = set(majors) | {t.strip() for t in field_str.split(",") if t.strip()}
-            # exact-token or clear phrase match; also allow field substring only if token >= 4 chars
-            if fl in tokens:
-                return True
-            for tk in tokens:
-                if fl == tk:
+            for fl in fields:
+                if fl in tokens:
                     return True
-                if len(fl) >= 4 and (fl in tk or tk in fl):
-                    return True
+                for tk in tokens:
+                    if fl == tk:
+                        return True
+                    if len(fl) >= 4 and (fl in tk or tk in fl):
+                        return True
             return False
-        out = [i for i in out if _has_field(i)]
+        out = [i for i in out if _has_any_field(i)]
+
+    tiers = _as_list(tier)
+    if tiers:
+        out = [i for i in out if str(i.get("tier", "")).lower() in tiers]
+
     if max_fees is not None:
         def _ok_fees(x):
             f = x.get("fees_inr_lakhs")
             if f is None or f == "":
-                return True  # unknown fees pass
+                return True
             try:
-                return float(f) <= max_fees
+                return float(f) <= float(max_fees)
             except Exception:
                 return True
         out = [i for i in out if _ok_fees(i)]
+
+    if level:
+        ll = level.lower().strip()
+        out = [i for i in out if ll in str(i.get("level", "")).lower()]
+
+    if funding:
+        fu = funding.lower().strip()
+        out = [i for i in out if fu in str(i.get("funding", "")).lower()]
+
+    if competitiveness:
+        cc = competitiveness.lower().strip()
+        out = [i for i in out if cc in str(i.get("competitiveness", "")).lower()]
+
+    if pr_friendly is not None:
+        out = [i for i in out if bool(i.get("pr_friendly")) == bool(pr_friendly)]
+
     return out
 
 
@@ -528,17 +575,26 @@ async def explore(
     kind: str,
     q: Optional[str] = None,
     tag: Optional[str] = None,
-    country: Optional[str] = None,
-    state: Optional[str] = None,
-    field: Optional[str] = None,
+    country: Optional[str] = None,      # CSV allowed
+    state: Optional[str] = None,        # CSV allowed
+    region: Optional[str] = None,       # CSV allowed
+    field: Optional[str] = None,        # CSV allowed
+    tier: Optional[str] = None,         # CSV allowed
     max_fees_inr_lakhs: Optional[float] = None,
+    level: Optional[str] = None,
+    funding: Optional[str] = None,
+    competitiveness: Optional[str] = None,
+    pr_friendly: Optional[bool] = None,
 ):
     if kind not in SOURCES:
         raise HTTPException(status_code=404, detail="Unknown kind")
     return {
         "items": _filter(
             SOURCES[kind], q, tag,
-            country=country, state=state, field=field, max_fees=max_fees_inr_lakhs,
+            country=country, state=state, region=region, field=field,
+            tier=tier, max_fees=max_fees_inr_lakhs, level=level,
+            funding=funding, competitiveness=competitiveness,
+            pr_friendly=pr_friendly,
         )
     }
 
@@ -550,19 +606,18 @@ async def explore_filter_options(kind: str):
         raise HTTPException(status_code=404, detail="Unknown kind")
     items = SOURCES[kind]
     countries = sorted({str(i.get("country", "")).strip() for i in items if i.get("country")})
-    # states are keyed by country for nested filtering
+    regions = sorted({str(i.get("region", "")).strip() for i in items if i.get("region")})
     states_by_country: dict[str, set[str]] = {}
     for i in items:
         c = str(i.get("country", "")).strip()
         s = str(i.get("state", "")).strip()
         if c and s:
             states_by_country.setdefault(c, set()).add(s)
-    fields = set()
+    fields: set[str] = set()
     for i in items:
         for m in (i.get("best_majors") or []):
             if m:
                 fields.add(str(m).strip())
-        # scholarship items use "field" as CSV string
         f = i.get("field")
         if isinstance(f, str):
             for x in f.split(","):
@@ -573,11 +628,22 @@ async def explore_filter_options(kind: str):
             for x in f:
                 if x:
                     fields.add(str(x).strip())
+    levels = sorted({str(i.get("level", "")).strip() for i in items if i.get("level")})
+    fundings = sorted({str(i.get("funding", "")).strip() for i in items if i.get("funding")})
+    comps = sorted({str(i.get("competitiveness", "")).strip() for i in items if i.get("competitiveness")})
+    tiers = sorted({str(i.get("tier")) for i in items if i.get("tier") not in (None, "")}, key=lambda x: int(x) if x.isdigit() else 99)
+    has_pr_friendly = any("pr_friendly" in i for i in items)
     return {
         "countries": countries,
+        "regions": regions,
         "states_by_country": {k: sorted(v) for k, v in states_by_country.items()},
         "fields": sorted(fields),
         "budget_buckets_inr_lakhs": [1, 2, 3, 5, 10, 20, 50, 100],
+        "levels": levels,
+        "fundings": fundings,
+        "competitiveness": comps,
+        "tiers": tiers,
+        "has_pr_friendly": has_pr_friendly,
     }
 
 
