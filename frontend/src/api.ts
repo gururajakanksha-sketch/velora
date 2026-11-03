@@ -169,27 +169,47 @@ export const api = {
   explore: (kind: ExploreKind, params?: {
     q?: string;
     tag?: string;
-    country?: string;
-    state?: string;
-    field?: string;
+    country?: string[] | string;
+    state?: string[] | string;
+    region?: string[] | string;
+    field?: string[] | string;
+    tier?: string[] | string;
     max_fees_inr_lakhs?: number;
+    level?: string;
+    funding?: string;
+    competitiveness?: string;
+    pr_friendly?: boolean;
   }) => {
     const p = new URLSearchParams({ kind });
+    const csv = (v: string[] | string | undefined) =>
+      Array.isArray(v) ? v.join(",") : v;
     if (params?.q) p.set("q", params.q);
     if (params?.tag) p.set("tag", params.tag);
-    if (params?.country) p.set("country", params.country);
-    if (params?.state) p.set("state", params.state);
-    if (params?.field) p.set("field", params.field);
+    const cv = csv(params?.country); if (cv) p.set("country", cv);
+    const sv = csv(params?.state); if (sv) p.set("state", sv);
+    const rv = csv(params?.region); if (rv) p.set("region", rv);
+    const fv = csv(params?.field); if (fv) p.set("field", fv);
+    const tv = csv(params?.tier); if (tv) p.set("tier", tv);
     if (params?.max_fees_inr_lakhs != null)
       p.set("max_fees_inr_lakhs", String(params.max_fees_inr_lakhs));
+    if (params?.level) p.set("level", params.level);
+    if (params?.funding) p.set("funding", params.funding);
+    if (params?.competitiveness) p.set("competitiveness", params.competitiveness);
+    if (params?.pr_friendly != null) p.set("pr_friendly", String(params.pr_friendly));
     return req<{ items: any[] }>(`/explore?${p.toString()}`);
   },
   exploreFilterOptions: (kind: ExploreKind) =>
     req<{
       countries: string[];
+      regions: string[];
       states_by_country: Record<string, string[]>;
       fields: string[];
       budget_buckets_inr_lakhs: number[];
+      levels: string[];
+      fundings: string[];
+      competitiveness: string[];
+      tiers: string[];
+      has_pr_friendly: boolean;
     }>(`/explore/filters/options?kind=${kind}`),
   exploreItem: (kind: ExploreKind, id: string) => req<any>(`/explore/${kind}/${id}`),
   recommend: (payload: {

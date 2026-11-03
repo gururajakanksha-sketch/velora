@@ -28,19 +28,98 @@ const KINDS: { key: ExploreKind; label: string; icon: any }[] = [
 ];
 
 type Filters = {
-  country?: string;
-  state?: string;
-  field?: string;
+  country?: string[];
+  state?: string[];
+  region?: string[];
+  field?: string[];
+  tier?: string[];
   max_fees_inr_lakhs?: number;
+  level?: string;
+  funding?: string;
+  competitiveness?: string;
+  pr_friendly?: boolean;
 };
 
-const KINDS_SUPPORTING_STATE = new Set<ExploreKind>(["universities"]);
-const KINDS_SUPPORTING_FEES = new Set<ExploreKind>(["universities"]);
-const KINDS_SUPPORTING_FIELD = new Set<ExploreKind>([
-  "universities",
-  "scholarships",
-  "hidden_courses",
-]);
+type FilterOptions = {
+  countries: string[];
+  regions: string[];
+  states_by_country: Record<string, string[]>;
+  fields: string[];
+  budget_buckets_inr_lakhs: number[];
+  levels: string[];
+  fundings: string[];
+  competitiveness: string[];
+  tiers: string[];
+  has_pr_friendly: boolean;
+};
+
+// Older backend deployments may return only the filter fields they support.
+// Normalize at the network boundary so an omitted option group cannot crash
+// Explore while the backend is being brought up to date.
+function normalizeFilterOptions(value: Partial<FilterOptions> | null | undefined): FilterOptions {
+  const list = <T,>(candidate: unknown): T[] =>
+    Array.isArray(candidate) ? candidate as T[] : [];
+  const rawStates = value?.states_by_country;
+  const statesByCountry =
+    rawStates && typeof rawStates === "object" && !Array.isArray(rawStates)
+      ? Object.fromEntries(
+          Object.entries(rawStates).map(([country, states]) => [country, list<string>(states)])
+        )
+      : {};
+
+  return {
+    countries: list(value?.countries),
+    regions: list(value?.regions),
+    states_by_country: statesByCountry,
+    fields: list(value?.fields),
+    budget_buckets_inr_lakhs: list(value?.budget_buckets_inr_lakhs),
+    levels: list(value?.levels),
+    fundings: list(value?.fundings),
+    competitiveness: list(value?.competitiveness),
+    tiers: list(value?.tiers),
+    has_pr_friendly: value?.has_pr_friendly === true,
+  };
+}
+
+// Per-kind config: which sections show
+const KIND_CONFIG: Record<
+  ExploreKind,
+  {
+    country?: boolean;
+    state?: boolean;
+    region?: boolean;
+    field?: boolean;
+    tier?: boolean;
+    fees?: boolean;
+    level?: boolean;
+    funding?: boolean;
+    competitiveness?: boolean;
+    pr?: boolean;
+  }
+> = {
+  universities: {
+    country: true,
+    state: true,
+    field: true,
+    tier: true,
+    fees: true,
+  },
+  scholarships: {
+    country: true,
+    field: true,
+    level: true,
+    funding: true,
+    competitiveness: true,
+  },
+  hidden_courses: { country: true, field: true },
+  muns: { country: true, region: true },
+  countries: { region: true, field: true, fees: true, pr: true },
+};
+
+const toggle = <T,>(arr: T[] | undefined, v: T): T[] => {
+  const list = arr || [];
+  return list.includes(v) ? list.filter((x) => x !== v) : [...list, v];
+};
 
 export default function ExploreScreen() {
   const insets = useSafeAreaInsets();
@@ -51,12 +130,7 @@ export default function ExploreScreen() {
   const [loading, setLoading] = useState(false);
   const [filters, setFilters] = useState<Filters>({});
   const [filterModal, setFilterModal] = useState(false);
-  const [options, setOptions] = useState<{
-    countries: string[];
-    states_by_country: Record<string, string[]>;
-    fields: string[];
-    budget_buckets_inr_lakhs: number[];
-  } | null>(null);
+  const [options, setOptions] = useState<FilterOptions | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -75,25 +149,31 @@ export default function ExploreScreen() {
     return () => clearTimeout(t);
   }, [load]);
 
-  // Load filter options whenever kind changes and reset filters
   useEffect(() => {
     setFilters({});
     (async () => {
       try {
         const o = await api.exploreFilterOptions(kind);
-        setOptions(o);
+        setOptions(normalizeFilterOptions(o));
       } catch {
         setOptions(null);
       }
     })();
   }, [kind]);
 
-  const activeFilterCount = useMemo(
-    () =>
-      Object.values(filters).filter((v) => v !== undefined && v !== null && v !== "")
-        .length,
-    [filters]
-  );
+  const activeFilterCount = useMemo(() => {
+    let n = 0;
+    (["country", "state", "region", "field", "tier"] as const).forEach((k) => {
+      const v = filters[k];
+      if (v && v.length) n += 1;
+    });
+    (["level", "funding", "competitiveness"] as const).forEach((k) => {
+      if (filters[k]) n += 1;
+    });
+    if (filters.max_fees_inr_lakhs != null) n += 1;
+    if (filters.pr_friendly != null) n += 1;
+    return n;
+  }, [filters]);
 
   return (
     <GridPaper style={styles.container} variant="warm">
@@ -166,42 +246,118 @@ export default function ExploreScreen() {
           })}
         </ScrollView>
 
-        {/* Active filter chips */}
         {activeFilterCount > 0 && (
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.activeFilterRow}
           >
-            {filters.country && (
+            {(filters.country || []).map((c) => (
               <FilterPill
-                label={filters.country}
+                key={`c-${c}`}
+                label={c}
                 icon="earth"
                 onClear={() =>
-                  setFilters((f) => ({ ...f, country: undefined, state: undefined }))
+                  setFilters((f) => ({
+                    ...f,
+                    country: (f.country || []).filter((x) => x !== c),
+                    state: [],
+                  }))
                 }
               />
-            )}
-            {filters.state && (
+            ))}
+            {(filters.state || []).map((s) => (
               <FilterPill
-                label={filters.state}
+                key={`s-${s}`}
+                label={s}
                 icon="location"
-                onClear={() => setFilters((f) => ({ ...f, state: undefined }))}
+                onClear={() =>
+                  setFilters((f) => ({
+                    ...f,
+                    state: (f.state || []).filter((x) => x !== s),
+                  }))
+                }
               />
-            )}
-            {filters.field && (
+            ))}
+            {(filters.region || []).map((r) => (
               <FilterPill
-                label={filters.field}
-                icon="book"
-                onClear={() => setFilters((f) => ({ ...f, field: undefined }))}
+                key={`r-${r}`}
+                label={r}
+                icon="globe"
+                onClear={() =>
+                  setFilters((f) => ({
+                    ...f,
+                    region: (f.region || []).filter((x) => x !== r),
+                  }))
+                }
               />
-            )}
+            ))}
+            {(filters.field || []).map((c) => (
+              <FilterPill
+                key={`f-${c}`}
+                label={c}
+                icon="book"
+                onClear={() =>
+                  setFilters((f) => ({
+                    ...f,
+                    field: (f.field || []).filter((x) => x !== c),
+                  }))
+                }
+              />
+            ))}
+            {(filters.tier || []).map((t) => (
+              <FilterPill
+                key={`t-${t}`}
+                label={`Tier ${t}`}
+                icon="ribbon"
+                onClear={() =>
+                  setFilters((f) => ({
+                    ...f,
+                    tier: (f.tier || []).filter((x) => x !== t),
+                  }))
+                }
+              />
+            ))}
             {filters.max_fees_inr_lakhs != null && (
               <FilterPill
                 label={`≤ ₹${filters.max_fees_inr_lakhs}L/yr`}
                 icon="cash"
                 onClear={() =>
                   setFilters((f) => ({ ...f, max_fees_inr_lakhs: undefined }))
+                }
+              />
+            )}
+            {filters.level && (
+              <FilterPill
+                label={filters.level}
+                icon="school"
+                onClear={() => setFilters((f) => ({ ...f, level: undefined }))}
+              />
+            )}
+            {filters.funding && (
+              <FilterPill
+                label={filters.funding}
+                icon="wallet"
+                onClear={() =>
+                  setFilters((f) => ({ ...f, funding: undefined }))
+                }
+              />
+            )}
+            {filters.competitiveness && (
+              <FilterPill
+                label={filters.competitiveness}
+                icon="pulse"
+                onClear={() =>
+                  setFilters((f) => ({ ...f, competitiveness: undefined }))
+                }
+              />
+            )}
+            {filters.pr_friendly != null && (
+              <FilterPill
+                label={filters.pr_friendly ? "PR friendly" : "No-PR"}
+                icon="airplane"
+                onClear={() =>
+                  setFilters((f) => ({ ...f, pr_friendly: undefined }))
                 }
               />
             )}
@@ -293,27 +449,31 @@ function FilterModal({
   visible: boolean;
   onClose: () => void;
   kind: ExploreKind;
-  options: {
-    countries: string[];
-    states_by_country: Record<string, string[]>;
-    fields: string[];
-    budget_buckets_inr_lakhs: number[];
-  } | null;
+  options: FilterOptions | null;
   filters: Filters;
   onChange: (f: Filters) => void;
 }) {
   const [draft, setDraft] = useState<Filters>(filters);
   useEffect(() => setDraft(filters), [filters, visible]);
-
   const insets = useSafeAreaInsets();
-  const supportsState = KINDS_SUPPORTING_STATE.has(kind);
-  const supportsFees = KINDS_SUPPORTING_FEES.has(kind);
-  const supportsField = KINDS_SUPPORTING_FIELD.has(kind);
+  const cfg = KIND_CONFIG[kind];
 
+  // Combine states from all selected countries
   const availableStates = useMemo(() => {
-    if (!options || !draft.country) return [];
-    return options.states_by_country[draft.country] || [];
-  }, [options, draft.country]);
+    if (!options || !cfg.state) return [];
+    const chosen = draft.country || [];
+    if (chosen.length === 0) {
+      // Show all Indian states as most common use-case, plus any other populated
+      return Array.from(
+        new Set(
+          Object.values(options.states_by_country).flat()
+        )
+      ).sort();
+    }
+    return Array.from(
+      new Set(chosen.flatMap((c) => options.states_by_country[c] || []))
+    ).sort();
+  }, [options, draft.country, cfg.state]);
 
   return (
     <Modal
@@ -324,70 +484,181 @@ function FilterModal({
     >
       <View style={styles.modalRoot}>
         <Pressable style={styles.modalBackdrop} onPress={onClose} />
-        <View style={[styles.modalSheet, { paddingBottom: insets.bottom + spacing.lg }]}>
+        <View
+          style={[
+            styles.modalSheet,
+            { paddingBottom: insets.bottom + spacing.lg },
+          ]}
+        >
           <View style={styles.modalHandle} />
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>
-              Refine <Text style={styles.modalTitleAccent}>{kind.replace("_", " ")}</Text>
+              Refine{" "}
+              <Text style={styles.modalTitleAccent}>
+                {kind.replace("_", " ")}
+              </Text>
             </Text>
             <Pressable onPress={onClose} hitSlop={8}>
               <Ionicons name="close" size={22} color={colors.ink} />
             </Pressable>
           </View>
+          <Text style={styles.modalHint}>Tap to add — you can select many.</Text>
 
-          <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 520 }}>
-            {/* Country */}
-            {options && options.countries.length > 0 && (
-              <FilterSection title="Country">
+          <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 540 }}>
+            {cfg.region && options && options.regions.length > 0 && (
+              <FilterSection title="Region">
+                <ChipCloud
+                  options={options.regions}
+                  selected={draft.region || []}
+                  multi
+                  onToggle={(v) =>
+                    setDraft((d) => ({ ...d, region: toggle(d.region, v) }))
+                  }
+                  testIDPrefix="filter-region"
+                />
+              </FilterSection>
+            )}
+
+            {cfg.country && options && options.countries.length > 0 && (
+              <FilterSection
+                title="Country"
+                subtitle="Pick any number of countries"
+              >
                 <ChipCloud
                   options={options.countries}
-                  selected={draft.country}
-                  onSelect={(v) =>
-                    setDraft((d) => ({
-                      ...d,
-                      country: d.country === v ? undefined : v,
-                      state: d.country === v ? undefined : d.state,
-                    }))
+                  selected={draft.country || []}
+                  multi
+                  onToggle={(v) =>
+                    setDraft((d) => {
+                      const nextCountries = toggle(d.country, v);
+                      // clear states that don't belong anymore
+                      const validStates = new Set(
+                        nextCountries.flatMap(
+                          (c) => options.states_by_country[c] || []
+                        )
+                      );
+                      const cleanState = (d.state || []).filter((s) =>
+                        validStates.has(s)
+                      );
+                      return { ...d, country: nextCountries, state: cleanState };
+                    })
                   }
                   testIDPrefix="filter-country"
                 />
               </FilterSection>
             )}
 
-            {/* State */}
-            {supportsState && availableStates.length > 0 && (
+            {cfg.state && availableStates.length > 0 && (
               <FilterSection
-                title={`State / Region in ${draft.country ?? ""}`}
-                subtitle="Narrow down by region"
+                title="State / Region"
+                subtitle={
+                  draft.country && draft.country.length
+                    ? `Within ${draft.country.join(", ")}`
+                    : "Across all countries with state data"
+                }
               >
                 <ChipCloud
                   options={availableStates}
-                  selected={draft.state}
-                  onSelect={(v) =>
-                    setDraft((d) => ({ ...d, state: d.state === v ? undefined : v }))
+                  selected={draft.state || []}
+                  multi
+                  onToggle={(v) =>
+                    setDraft((d) => ({ ...d, state: toggle(d.state, v) }))
                   }
                   testIDPrefix="filter-state"
                 />
               </FilterSection>
             )}
 
-            {/* Field / Course */}
-            {supportsField && options && options.fields.length > 0 && (
-              <FilterSection title="Field / Course">
+            {cfg.field && options && options.fields.length > 0 && (
+              <FilterSection
+                title="Field / Course"
+                subtitle="Choose one or many courses"
+              >
                 <ChipCloud
                   options={options.fields}
-                  selected={draft.field}
-                  onSelect={(v) =>
-                    setDraft((d) => ({ ...d, field: d.field === v ? undefined : v }))
+                  selected={draft.field || []}
+                  multi
+                  onToggle={(v) =>
+                    setDraft((d) => ({ ...d, field: toggle(d.field, v) }))
                   }
                   testIDPrefix="filter-field"
                 />
               </FilterSection>
             )}
 
-            {/* Budget */}
-            {supportsFees && options && (
-              <FilterSection title="Budget" subtitle="Max annual fees (₹ lakhs)">
+            {cfg.tier && options && options.tiers.length > 0 && (
+              <FilterSection title="Tier" subtitle="1 = Elite · 4 = Accessible">
+                <ChipCloud
+                  options={options.tiers}
+                  selected={draft.tier || []}
+                  multi
+                  labelFn={(t) => `Tier ${t}`}
+                  onToggle={(v) =>
+                    setDraft((d) => ({ ...d, tier: toggle(d.tier, v) }))
+                  }
+                  testIDPrefix="filter-tier"
+                />
+              </FilterSection>
+            )}
+
+            {cfg.level && options && options.levels.length > 0 && (
+              <FilterSection title="Level">
+                <ChipCloud
+                  options={options.levels}
+                  selected={draft.level ? [draft.level] : []}
+                  onToggle={(v) =>
+                    setDraft((d) => ({
+                      ...d,
+                      level: d.level === v ? undefined : v,
+                    }))
+                  }
+                  testIDPrefix="filter-level"
+                />
+              </FilterSection>
+            )}
+
+            {cfg.funding && options && options.fundings.length > 0 && (
+              <FilterSection title="Funding">
+                <ChipCloud
+                  options={options.fundings}
+                  selected={draft.funding ? [draft.funding] : []}
+                  onToggle={(v) =>
+                    setDraft((d) => ({
+                      ...d,
+                      funding: d.funding === v ? undefined : v,
+                    }))
+                  }
+                  testIDPrefix="filter-funding"
+                />
+              </FilterSection>
+            )}
+
+            {cfg.competitiveness &&
+              options &&
+              options.competitiveness.length > 0 && (
+                <FilterSection title="Competitiveness">
+                  <ChipCloud
+                    options={options.competitiveness}
+                    selected={
+                      draft.competitiveness ? [draft.competitiveness] : []
+                    }
+                    onToggle={(v) =>
+                      setDraft((d) => ({
+                        ...d,
+                        competitiveness:
+                          d.competitiveness === v ? undefined : v,
+                      }))
+                    }
+                    testIDPrefix="filter-comp"
+                  />
+                </FilterSection>
+              )}
+
+            {cfg.fees && options && (
+              <FilterSection
+                title="Budget"
+                subtitle="Max annual fees (₹ lakhs)"
+              >
                 <View style={styles.budgetRow}>
                   {options.budget_buckets_inr_lakhs.map((b) => {
                     const on = draft.max_fees_inr_lakhs === b;
@@ -410,6 +681,41 @@ function FilterModal({
                           ]}
                         >
                           ≤ ₹{b}L
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </FilterSection>
+            )}
+
+            {cfg.pr && (
+              <FilterSection title="PR Friendly" subtitle="Post-study residency">
+                <View style={styles.budgetRow}>
+                  {[
+                    { v: true, label: "PR-friendly" },
+                    { v: false, label: "Others" },
+                  ].map(({ v, label }) => {
+                    const on = draft.pr_friendly === v;
+                    return (
+                      <Pressable
+                        key={String(v)}
+                        onPress={() =>
+                          setDraft((d) => ({
+                            ...d,
+                            pr_friendly: on ? undefined : v,
+                          }))
+                        }
+                        style={[styles.budgetChip, on && styles.budgetChipOn]}
+                        testID={`filter-pr-${v}`}
+                      >
+                        <Text
+                          style={[
+                            styles.budgetChipText,
+                            on && styles.budgetChipTextOn,
+                          ]}
+                        >
+                          {label}
                         </Text>
                       </Pressable>
                     );
@@ -465,31 +771,72 @@ function FilterSection({
 function ChipCloud({
   options,
   selected,
-  onSelect,
+  multi,
+  onToggle,
   testIDPrefix,
+  labelFn,
 }: {
   options: string[];
-  selected?: string;
-  onSelect: (v: string) => void;
+  selected: string[];
+  multi?: boolean;
+  onToggle: (v: string) => void;
   testIDPrefix?: string;
+  labelFn?: (v: string) => string;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const LIMIT = 24;
+  const shown = expanded || options.length <= LIMIT ? options : options.slice(0, LIMIT);
   return (
-    <View style={styles.chipCloud}>
-      {options.map((o) => {
-        const on = selected === o;
-        return (
-          <Pressable
-            key={o}
-            onPress={() => onSelect(o)}
-            style={[styles.cloudChip, on && styles.cloudChipOn]}
-            testID={testIDPrefix ? `${testIDPrefix}-${o.replace(/\s+/g, "-")}` : undefined}
-          >
-            <Text style={[styles.cloudChipText, on && styles.cloudChipTextOn]} numberOfLines={1}>
-              {o}
-            </Text>
-          </Pressable>
-        );
-      })}
+    <View>
+      <View style={styles.chipCloud}>
+        {shown.map((o) => {
+          const on = selected.includes(o);
+          return (
+            <Pressable
+              key={o}
+              onPress={() => onToggle(o)}
+              style={[styles.cloudChip, on && styles.cloudChipOn]}
+              testID={
+                testIDPrefix
+                  ? `${testIDPrefix}-${o.replace(/\s+/g, "-")}`
+                  : undefined
+              }
+            >
+              {multi && (
+                <Ionicons
+                  name={on ? "checkmark-circle" : "add-circle-outline"}
+                  size={12}
+                  color={on ? colors.paper : colors.inkMuted}
+                  style={{ marginRight: 4 }}
+                />
+              )}
+              <Text
+                style={[styles.cloudChipText, on && styles.cloudChipTextOn]}
+                numberOfLines={1}
+              >
+                {labelFn ? labelFn(o) : o}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      {options.length > LIMIT && (
+        <Pressable
+          onPress={() => setExpanded((e) => !e)}
+          style={styles.showMore}
+        >
+          <Text style={styles.showMoreText}>
+            {expanded
+              ? "Show fewer"
+              : `Show all ${options.length}`}
+          </Text>
+          <Ionicons
+            name={expanded ? "chevron-up" : "chevron-down"}
+            size={14}
+            color={colors.navy}
+          />
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -573,10 +920,22 @@ function ExploreCard({
             <Text style={styles.metaText}>{item.difficulty}</Text>
           </View>
         )}
-        {item.region && (
+        {item.competitiveness && (
+          <View style={styles.metaPill}>
+            <Ionicons name="pulse-outline" size={11} color={colors.inkSoft} />
+            <Text style={styles.metaText}>{item.competitiveness}</Text>
+          </View>
+        )}
+        {item.region && kind !== "universities" && (
           <View style={styles.metaPill}>
             <Ionicons name="globe-outline" size={11} color={colors.inkSoft} />
             <Text style={styles.metaText}>{item.region}</Text>
+          </View>
+        )}
+        {item.pr_friendly && kind === "countries" && (
+          <View style={styles.metaPill}>
+            <Ionicons name="airplane-outline" size={11} color={colors.inkSoft} />
+            <Text style={styles.metaText}>PR-friendly</Text>
           </View>
         )}
       </View>
@@ -692,12 +1051,7 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
   chipTextOn: { color: colors.paper },
-
-  activeFilterRow: {
-    gap: 8,
-    paddingVertical: 4,
-    alignItems: "center",
-  },
+  activeFilterRow: { gap: 8, paddingVertical: 4, alignItems: "center" },
   activePill: {
     flexDirection: "row",
     alignItems: "center",
@@ -706,7 +1060,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     backgroundColor: colors.navy,
     borderRadius: radius.pill,
-    maxWidth: 220,
+    maxWidth: 240,
   },
   activePillText: {
     color: colors.paper,
@@ -729,7 +1083,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     letterSpacing: 0.5,
   },
-
   loading: { flex: 1, alignItems: "center", justifyContent: "center" },
   list: { padding: spacing.xl, gap: spacing.md, paddingBottom: spacing.xxxl },
   resultCount: {
@@ -740,7 +1093,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginBottom: spacing.sm,
   },
-
   card: {
     padding: spacing.lg,
     borderRadius: radius.lg,
@@ -817,7 +1169,6 @@ const styles = StyleSheet.create({
     color: colors.navy,
     fontWeight: "600",
   },
-
   empty: { padding: spacing.xl, alignItems: "center" },
   emptyText: {
     fontFamily: font.text,
@@ -825,8 +1176,7 @@ const styles = StyleSheet.create({
     fontSize: fontSize.md,
     textAlign: "center",
   },
-
-  // Filter modal
+  // Modal
   modalRoot: { flex: 1, justifyContent: "flex-end" },
   modalBackdrop: {
     ...StyleSheet.absoluteFillObject,
@@ -854,7 +1204,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: spacing.md,
   },
   modalTitle: {
     fontFamily: font.display,
@@ -867,6 +1216,13 @@ const styles = StyleSheet.create({
     fontFamily: font.displayItalic,
     fontStyle: "italic",
     color: colors.navy,
+  },
+  modalHint: {
+    fontFamily: font.displayItalic,
+    fontStyle: "italic",
+    fontSize: fontSize.xs,
+    color: colors.inkMuted,
+    marginBottom: spacing.md,
   },
   section: { marginBottom: spacing.lg },
   sectionTitle: {
@@ -884,13 +1240,15 @@ const styles = StyleSheet.create({
   },
   chipCloud: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   cloudChip: {
+    flexDirection: "row",
+    alignItems: "center",
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: radius.pill,
     backgroundColor: colors.white,
     borderWidth: 1,
     borderColor: colors.paperInk,
-    maxWidth: 220,
+    maxWidth: 240,
   },
   cloudChipOn: { backgroundColor: colors.ink, borderColor: colors.ink },
   cloudChipText: {
@@ -900,6 +1258,19 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
   cloudChipTextOn: { color: colors.paper },
+  showMore: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingVertical: 8,
+    alignSelf: "flex-start",
+  },
+  showMoreText: {
+    fontFamily: font.text,
+    fontSize: 12,
+    color: colors.navy,
+    fontWeight: "700",
+  },
   budgetRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   budgetChip: {
     paddingHorizontal: 14,
