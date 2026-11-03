@@ -1,8 +1,9 @@
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { colors, font, fontSize, spacing } from "@/src/theme";
+import { colors, font, fontSize } from "@/src/theme";
 
 function TabIcon({ focused, name }: { focused: boolean; name: any }) {
   return (
@@ -25,11 +26,15 @@ function TabLabel({ focused, label }: { focused: boolean; label: string }) {
 }
 
 export default function MainTabs() {
+  const insets = useSafeAreaInsets();
+  const bottomPad = Math.max(insets.bottom, 10);
+  const barHeight = 64 + bottomPad;
+
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarStyle: styles.tabBar,
+        tabBarStyle: [styles.tabBar, { height: barHeight, paddingBottom: bottomPad }],
         tabBarItemStyle: styles.tabItem,
         sceneStyle: { backgroundColor: colors.paper },
       }}
@@ -89,9 +94,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.paper,
     borderTopWidth: 1,
     borderTopColor: colors.paperInk,
-    height: 82,
     paddingTop: 8,
-    paddingBottom: 22,
   },
   tabItem: { paddingVertical: 4 },
   iconWrap: {
