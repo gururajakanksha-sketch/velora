@@ -53,6 +53,34 @@ type FilterOptions = {
   has_pr_friendly: boolean;
 };
 
+// Older backend deployments may return only the filter fields they support.
+// Normalize at the network boundary so an omitted option group cannot crash
+// Explore while the backend is being brought up to date.
+function normalizeFilterOptions(value: Partial<FilterOptions> | null | undefined): FilterOptions {
+  const list = <T,>(candidate: unknown): T[] =>
+    Array.isArray(candidate) ? candidate as T[] : [];
+  const rawStates = value?.states_by_country;
+  const statesByCountry =
+    rawStates && typeof rawStates === "object" && !Array.isArray(rawStates)
+      ? Object.fromEntries(
+          Object.entries(rawStates).map(([country, states]) => [country, list<string>(states)])
+        )
+      : {};
+
+  return {
+    countries: list(value?.countries),
+    regions: list(value?.regions),
+    states_by_country: statesByCountry,
+    fields: list(value?.fields),
+    budget_buckets_inr_lakhs: list(value?.budget_buckets_inr_lakhs),
+    levels: list(value?.levels),
+    fundings: list(value?.fundings),
+    competitiveness: list(value?.competitiveness),
+    tiers: list(value?.tiers),
+    has_pr_friendly: value?.has_pr_friendly === true,
+  };
+}
+
 // Per-kind config: which sections show
 const KIND_CONFIG: Record<
   ExploreKind,
@@ -126,7 +154,7 @@ export default function ExploreScreen() {
     (async () => {
       try {
         const o = await api.exploreFilterOptions(kind);
-        setOptions(o);
+        setOptions(normalizeFilterOptions(o));
       } catch {
         setOptions(null);
       }
