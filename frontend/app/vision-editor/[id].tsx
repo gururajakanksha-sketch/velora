@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   StyleSheet, View, Text, ScrollView, Pressable, TextInput, ActivityIndicator,
-  Dimensions, Platform, Modal, KeyboardAvoidingView,
+  Dimensions, Platform, Modal, KeyboardAvoidingView, Alert,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -10,6 +10,8 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
+import * as MediaLibrary from "expo-media-library";
+import { captureRef } from "react-native-view-shot";
 import { GestureDetector, Gesture } from "react-native-gesture-handler";
 import Animated, { useAnimatedStyle, useSharedValue, runOnJS } from "react-native-reanimated";
 
@@ -50,7 +52,8 @@ const BG_OPTIONS: { key: string; label: string; bg: string }[] = [
 
 type PickerMode = null | "image" | "text" | "sticker";
 
-/** Draggable + pinch-zoom item */
+/** Draggable + pinch-zoom item. Shared dimensions prevent gesture updates
+ * from being reset by the committed React props after each render. */
 function CanvasItem({
   item, selected, onSelect, onCommit, colorForSticker,
 }: {
@@ -61,16 +64,25 @@ function CanvasItem({
 }) {
   const x = useSharedValue(item.x);
   const y = useSharedValue(item.y);
-  const scale = useSharedValue(1);
+  const w = useSharedValue(item.w);
+  const h = useSharedValue(item.h);
   const rotation = useSharedValue(item.rotation);
   const savedScale = useSharedValue(1);
   const savedRotation = useSharedValue(item.rotation);
 
+  // The parent preserves the item key across edits. Sync only when the item is
+  // first mounted so prop echoes do not snap an active gesture back.
   useEffect(() => {
-    x.value = item.x; y.value = item.y; rotation.value = item.rotation;
-    scale.value = 1; savedScale.value = 1; savedRotation.value = item.rotation;
+    x.value = item.x;
+    y.value = item.y;
+    w.value = item.w;
+    h.value = item.h;
+    rotation.value = item.rotation;
+    savedScale.value = 1;
+    savedRotation.value = item.rotation;
+    // Intentionally depend only on item identity; prop updates during gestures must not reset shared values.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [item.id, item.x, item.y, item.rotation]);
+  }, [item.id]);
 
   const pan = Gesture.Pan()
     .onStart(() => { runOnJS(onSelect)(); })
@@ -78,13 +90,14 @@ function CanvasItem({
     .onEnd(() => { runOnJS(onCommit)({ x: x.value, y: y.value }); });
 
   const pinch = Gesture.Pinch()
-    .onStart(() => { runOnJS(onSelect)(); savedScale.value = scale.value; })
-    .onChange((e) => { scale.value = savedScale.value * e.scale; })
-    .onEnd(() => {
-      const w = Math.max(28, item.w * scale.value);
-      const h = Math.max(28, item.h * scale.value);
-      runOnJS(onCommit)({ w, h });
-    });
+    .onStart(() => { runOnJS(onSelect)(); savedScale.value = 1; })
+    .onChange((e) => {
+      const factor = e.scale / savedScale.value;
+      savedScale.value = e.scale;
+      w.value = Math.max(28, w.value * factor);
+      h.value = Math.max(28, h.value * factor);
+    })
+    .onEnd(() => { runOnJS(onCommit)({ w: w.value, h: h.value }); });
 
   const rot = Gesture.Rotation()
     .onStart(() => { runOnJS(onSelect)(); savedRotation.value = rotation.value; })
@@ -96,10 +109,18 @@ function CanvasItem({
 
   const style = useAnimatedStyle(() => ({
     position: "absolute" as const,
-    left: x.value, top: y.value, width: item.w, height: item.h,
-    transform: [{ scale: scale.value }, { rotate: `${rotation.value}deg` }],
+    left: x.value, top: y.value, width: w.value, height: h.value,
+    transform: [{ rotate: `${rotation.value}deg` }],
     zIndex: item.z,
+    elevation: item.z,
     borderWidth: selected ? 2 : 0, borderColor: colors.navy, borderStyle: "dashed" as const,
+  }));
+
+  const innerStickerStyle = useAnimatedStyle(() => ({
+    width: "100%" as const,
+    height: "100%" as const,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
   }));
 
   return (
@@ -107,11 +128,12 @@ function CanvasItem({
       <Animated.View style={style}>
         {item.kind === "image" && <Image source={item.url} style={{ width: "100%", height: "100%", borderRadius: 4 }} contentFit="cover" />}
         {item.kind === "sticker" && (
-          <Ionicons
-            name={item.sticker as any}
-            size={Math.min(item.w, item.h) * 0.9}
-            color={item.color || colorForSticker(item.sticker || "star")}
-          />
+          <Animated.View style={innerStickerStyle}>
+            <StickerIcon
+              name={item.sticker || "star"}
+              color={item.color || colorForSticker(item.sticker || "star")}
+            />
+          </Animated.View>
         )}
         {item.kind === "text" && (
           <Text style={{
@@ -122,6 +144,21 @@ function CanvasItem({
         )}
       </Animated.View>
     </GestureDetector>
+  );
+}
+
+function StickerIcon({ name, color }: { name: string; color: string }) {
+  const [size, setSize] = useState(28);
+  return (
+    <View
+      style={{ flex: 1, alignItems: "center", justifyContent: "center" }}
+      onLayout={(event) => {
+        const nextSize = Math.min(event.nativeEvent.layout.width, event.nativeEvent.layout.height) * 0.9;
+        setSize((current) => Math.abs(nextSize - current) > 1 ? nextSize : current);
+      }}
+    >
+      <Ionicons name={name as any} size={Math.max(16, size)} color={color} />
+    </View>
   );
 }
 
@@ -141,6 +178,7 @@ export default function VisionEditor() {
   const [pinUrl, setPinUrl] = useState("");
   const [titleEdit, setTitleEdit] = useState(false);
   const [titleValue, setTitleValue] = useState("");
+  const canvasRef = useRef<View>(null);
   const canvasW = SCREEN_W - CANVAS_PAD * 2;
   const canvasH = canvasW;
 
@@ -161,14 +199,29 @@ export default function VisionEditor() {
     commitChange({ ...board, items: [...board.items, item] });
     setSelectedId(item.id);
   };
-  const patchItem = (itemId: string, patch: Partial<VisionBoardItem>) => {
-    if (!board) return;
-    commitChange({ ...board, items: board.items.map((i) => (i.id === itemId ? { ...i, ...patch } : i)) });
-  };
+  const patchItem = useCallback((itemId: string, patch: Partial<VisionBoardItem>) => {
+    setBoard((current) => current
+      ? { ...current, items: current.items.map((item) => item.id === itemId ? { ...item, ...patch } : item) }
+      : current
+    );
+    setDirty(true);
+  }, []);
   const deleteItem = (itemId: string) => {
     if (!board) return;
     commitChange({ ...board, items: board.items.filter((i) => i.id !== itemId) });
     setSelectedId(null);
+  };
+
+  const bringToFront = (itemId: string) => {
+    if (!board) return;
+    const topZ = board.items.reduce((max, item) => Math.max(max, item.z), 0) + 1;
+    commitChange({ ...board, items: board.items.map((item) => item.id === itemId ? { ...item, z: topZ } : item) });
+  };
+
+  const sendToBack = (itemId: string) => {
+    if (!board) return;
+    const bottomZ = board.items.reduce((min, item) => Math.min(min, item.z), 0) - 1;
+    commitChange({ ...board, items: board.items.map((item) => item.id === itemId ? { ...item, z: bottomZ } : item) });
   };
 
   const nextId = () => `it_${Math.random().toString(36).slice(2, 8)}`;
@@ -177,6 +230,20 @@ export default function VisionEditor() {
   const addImage = (url: string) => {
     addItem({ id: nextId(), kind: "image", url, x: 30, y: 30, w: 160, h: 160, rotation: -3, z: nextZ() });
     setPicker(null); setPinUrl("");
+  };
+  const addImages = (urls: string[]) => {
+    if (!board || urls.length === 0) return;
+    let topZ = board.items.reduce((max, item) => Math.max(max, item.z), 0);
+    const newItems: VisionBoardItem[] = urls.map((url, index) => ({
+      id: nextId(), kind: "image", url,
+      x: 30 + (index % 4) * 24,
+      y: 30 + Math.floor(index / 4) * 32 + (index % 4) * 10,
+      w: 160, h: 160, rotation: ((index % 5) - 2) * 2.5, z: ++topZ,
+    }));
+    commitChange({ ...board, items: [...board.items, ...newItems] });
+    setSelectedId(newItems[0].id);
+    setPicker(null);
+    setPinUrl("");
   };
   const addText = () => {
     if (!textInput.trim()) return;
@@ -198,12 +265,15 @@ export default function VisionEditor() {
     if (!perm.granted) return;
     const res = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true, aspect: undefined, quality: 0.7, base64: true,
+      allowsEditing: false,
+      allowsMultipleSelection: true,
+      selectionLimit: 10,
+      quality: 0.7,
+      base64: true,
     });
     if (res.canceled) return;
-    const a = res.assets[0];
-    const url = a.base64 ? `data:image/jpeg;base64,${a.base64}` : a.uri;
-    addImage(url);
+    const urls = res.assets.map((asset) => asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : asset.uri);
+    addImages(urls);
   };
   const cropFromLibrary = async () => {
     // "Carve" MVP: use image picker's built-in crop tool (allowsEditing)
@@ -222,7 +292,15 @@ export default function VisionEditor() {
   const saveBoard = async () => {
     if (!board) return;
     setSaving(true);
-    try { const r = await api.saveVisionBoard(board); setBoard(r.board); setDirty(false); } finally { setSaving(false); }
+    try {
+      const r = await api.saveVisionBoard(board);
+      setBoard(r.board);
+      setDirty(false);
+    } catch {
+      Alert.alert("Couldn't save", "Your changes are still on this screen. Please try again.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const exportPDF = async () => {
@@ -257,6 +335,34 @@ export default function VisionEditor() {
     } finally { setExporting(false); }
   };
 
+  const exportPNG = async () => {
+    if (!board || !canvasRef.current) return;
+    setExporting(true);
+    try {
+      setSelectedId(null);
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      const uri = await captureRef(canvasRef, { format: "png", quality: 1, result: "tmpfile" });
+      let canSaveToLibrary = false;
+      if (Platform.OS === "android") {
+        // Android 13+ allows apps to add their own media without broad read access.
+        const permission = Number(Platform.Version) < 33
+          ? await MediaLibrary.requestPermissionsAsync(true)
+          : { granted: true };
+        canSaveToLibrary = permission.granted;
+      }
+      if (canSaveToLibrary) {
+        await MediaLibrary.saveToLibraryAsync(uri);
+        Alert.alert("Saved", "Your vision board was saved to Photos.");
+      } else if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, { mimeType: "image/png", dialogTitle: "Save your vision board", UTI: "public.png" });
+      }
+    } catch {
+      Alert.alert("Export failed", "Could not save your board. Please try again.");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const commitTitle = () => {
     if (!board) return;
     commitChange({ ...board, title: titleValue.trim() || "Untitled" });
@@ -272,6 +378,7 @@ export default function VisionEditor() {
     );
   }
   const sel = board.items.find((i) => i.id === selectedId);
+  const drawOrder = [...board.items].sort((a, b) => a.z - b.z);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
@@ -291,6 +398,11 @@ export default function VisionEditor() {
           <Pressable onPress={exportPDF} disabled={exporting} hitSlop={8} testID="vision-export">
             {exporting ? <ActivityIndicator color={colors.navy} /> : <Ionicons name="download-outline" size={22} color={colors.ink} />}
           </Pressable>
+          {Platform.OS !== "web" && (
+            <Pressable onPress={exportPNG} disabled={exporting} hitSlop={8} testID="vision-export-png">
+              <Ionicons name="image-outline" size={22} color={colors.ink} />
+            </Pressable>
+          )}
           <Pressable onPress={saveBoard} disabled={saving} hitSlop={8} testID="vision-save">
             {saving ? <ActivityIndicator color={colors.navy} /> :
               <Ionicons name={dirty ? "save" : "checkmark-done"} size={22} color={dirty ? colors.navy : colors.success} />}
@@ -308,8 +420,8 @@ export default function VisionEditor() {
       </ScrollView>
 
       <View style={styles.canvasWrap}>
-        <View style={[styles.canvas, { width: canvasW, height: canvasH, backgroundColor: bg.bg }]}>
-          {board.items.map((it) => (
+        <View ref={canvasRef} collapsable={false} style={[styles.canvas, { width: canvasW, height: canvasH, backgroundColor: bg.bg }]}>
+          {drawOrder.map((it) => (
             <CanvasItem
               key={it.id}
               item={it}
@@ -324,7 +436,13 @@ export default function VisionEditor() {
 
       {sel && (
         <View style={styles.selBar}>
-          <Text style={styles.selHint}>Drag · pinch to zoom · two-finger rotate</Text>
+          <Pressable onPress={() => sendToBack(sel.id)} style={styles.selIconBtn} testID="vision-send-back">
+            <Ionicons name="chevron-down" size={16} color={colors.ink} />
+          </Pressable>
+          <Pressable onPress={() => bringToFront(sel.id)} style={styles.selIconBtn} testID="vision-bring-front">
+            <Ionicons name="chevron-up" size={16} color={colors.ink} />
+          </Pressable>
+          <Text style={styles.selHint}>Drag · pinch · two-finger rotate</Text>
           <Pressable onPress={() => deleteItem(sel.id)} style={styles.deleteBtn} testID="vision-delete">
             <Ionicons name="trash" size={18} color={colors.error} />
           </Pressable>
@@ -445,7 +563,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill, flexDirection: "row", padding: 8, gap: spacing.sm, borderWidth: 1, borderColor: colors.ink,
     justifyContent: "space-between", alignItems: "center", ...shadow.card,
   },
-  selHint: { flex: 1, textAlign: "center", fontFamily: font.textItalic || font.text, fontSize: fontSize.xs, color: colors.ink, fontStyle: "italic" },
+  selIconBtn: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center", backgroundColor: colors.paper },
+  selHint: { flex: 1, textAlign: "center", fontFamily: font.text, fontSize: fontSize.xs, color: colors.ink, fontStyle: "italic" },
   deleteBtn: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center", backgroundColor: colors.paper },
   selBtn: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center", backgroundColor: colors.paper },
   selSep: { width: 1, height: 20, backgroundColor: colors.paperInk, marginHorizontal: 4 },

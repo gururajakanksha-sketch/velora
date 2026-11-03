@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
-import { StyleSheet, View, Text, ScrollView, Pressable, ActivityIndicator, RefreshControl, TextInput, Platform } from "react-native";
-import { useRouter } from "expo-router";
+import { useCallback, useState } from "react";
+import { StyleSheet, View, Text, ScrollView, Pressable, ActivityIndicator, RefreshControl, Platform, Alert } from "react-native";
+import { useFocusEffect, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
@@ -21,19 +21,22 @@ export default function VisionTab() {
   const router = useRouter();
   const [boards, setBoards] = useState<VisionBoard[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       const r = await api.visionBoards();
       setBoards(r.boards);
     } catch {
       setBoards([]);
     }
-  };
-
-  useEffect(() => {
-    load();
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -48,6 +51,34 @@ export default function VisionTab() {
       items: [],
     });
     router.push(`/vision-editor/${r.board.id}`);
+  };
+
+  const deleteBoard = async (board: VisionBoard) => {
+    const previousBoards = boards || [];
+    setDeletingId(board.id);
+    setBoards((current) => (current || []).filter((item) => item.id !== board.id));
+    try {
+      await api.deleteVisionBoard(board.id);
+    } catch {
+      setBoards(previousBoards);
+      Alert.alert("Couldn't delete", "Please try again.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const confirmDelete = (board: VisionBoard) => {
+    const message = `"${board.title}" will be permanently removed.`;
+    if (Platform.OS === "web") {
+      if (typeof window !== "undefined" && window.confirm(`Delete ${message}`)) {
+        void deleteBoard(board);
+      }
+      return;
+    }
+    Alert.alert("Delete this board?", message, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Delete", style: "destructive", onPress: () => void deleteBoard(board) },
+    ]);
   };
 
   return (
@@ -82,24 +113,39 @@ export default function VisionTab() {
 
         {boards?.map((b, i) => (
           <Animated.View key={b.id} entering={FadeInUp.delay(i * 60).duration(400)}>
-            <Pressable
-              testID={`vision-board-${b.id}`}
-              onPress={() => router.push(`/vision-editor/${b.id}`)}
-              style={styles.boardCard}
-            >
-              <Image
-                source={b.items.find((i) => i.kind === "image")?.url || COVERS[i % COVERS.length]}
-                style={styles.boardImage}
-                contentFit="cover"
-              />
-              <View style={styles.boardBody}>
-                <Text style={styles.boardTitle}>{b.title}</Text>
-                <Text style={styles.boardMeta}>
-                  {b.items.length} {b.items.length === 1 ? "item" : "items"} · updated {new Date(b.updated_at).toLocaleDateString()}
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={colors.inkMuted} />
-            </Pressable>
+            <View style={styles.boardCard}>
+              <Pressable
+                testID={`vision-board-${b.id}`}
+                onPress={() => router.push(`/vision-editor/${b.id}`)}
+                style={styles.boardCardMain}
+              >
+                <Image
+                  source={b.items.find((i) => i.kind === "image")?.url || COVERS[i % COVERS.length]}
+                  style={styles.boardImage}
+                  contentFit="cover"
+                />
+                <View style={styles.boardBody}>
+                  <Text style={styles.boardTitle}>{b.title}</Text>
+                  <Text style={styles.boardMeta}>
+                    {b.items.length} {b.items.length === 1 ? "item" : "items"} · updated {new Date(b.updated_at).toLocaleDateString()}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={colors.inkMuted} />
+              </Pressable>
+              <Pressable
+                onPress={() => confirmDelete(b)}
+                testID={`vision-delete-${b.id}`}
+                hitSlop={10}
+                style={styles.boardDeleteBtn}
+                disabled={deletingId === b.id}
+              >
+                {deletingId === b.id ? (
+                  <ActivityIndicator size="small" color={colors.error} />
+                ) : (
+                  <Ionicons name="trash-outline" size={16} color={colors.error} />
+                )}
+              </Pressable>
+            </View>
           </Animated.View>
         ))}
 
@@ -131,10 +177,16 @@ const styles = StyleSheet.create({
   newTitle: { fontFamily: font.display, fontSize: fontSize.xl, color: colors.ink, fontWeight: "500" },
   newSub: { fontFamily: font.text, fontSize: fontSize.sm, color: colors.inkSoft },
   boardCard: {
-    flexDirection: "row", alignItems: "center", gap: spacing.md,
-    padding: spacing.md, borderRadius: radius.lg, backgroundColor: colors.white,
+    flexDirection: "row", alignItems: "stretch",
+    borderRadius: radius.lg, backgroundColor: colors.white,
     borderWidth: 1, borderColor: colors.paperInk, marginBottom: spacing.md,
+    overflow: "hidden",
     ...shadow.soft,
+  },
+  boardCardMain: { flex: 1, flexDirection: "row", alignItems: "center", gap: spacing.md, padding: spacing.md },
+  boardDeleteBtn: {
+    width: 46, alignItems: "center", justifyContent: "center",
+    borderLeftWidth: 1, borderLeftColor: colors.paperInk, backgroundColor: colors.paperCool,
   },
   boardImage: { width: 70, height: 70, borderRadius: radius.md, backgroundColor: colors.paperCool },
   boardBody: { flex: 1 },
